@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Next.js
+.next/
+frontend/.next/
+out/
+
+# Foundry build artifacts
+cache/
+broadcast/
+
+# Environment — NEVER commit secrets
+.env
+.env.local
+.env*.local
+
+# Project tooling & planning (local only — never committed)
+_bmad/
+_bmad-output/
+.agents/
+.claude/
+design-artifacts/
+docs/
