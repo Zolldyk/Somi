@@ -1,8 +1,8 @@
 # Somi: Autonomous AI-Resolved Prediction Markets on Somnia Agentic L1
 
-Somi is a prediction market platform where every market is resolved autonomously by an AI agent, with verdicts anchored on-chain via the Somnia Agents platform. No human moderators. No off-chain oracles. The agent calls it — on-chain, verifiably, every time.
+Somi is a prediction market platform where every market is resolved autonomously by an AI agent, with verdicts anchored on-chain via the Somnia Agents platform. No human moderators. No off-chain oracles. The agent calls it and the activities remain verifiably on-chain every time.
 
-Built on [Somnia Agentic L1](https://docs.somnia.network) — a high-throughput EVM chain purpose-built for agent-native applications.
+Built on [Somnia Agentic L1](https://docs.somnia.network). Somnia is a high-throughput EVM chain purpose-built for agent-native applications.
 
 ## Project Structure
 

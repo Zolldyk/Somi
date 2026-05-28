@@ -10,6 +10,8 @@ import {
     PredictionMarket__NotWinningPosition,
     PredictionMarket__NotRefundable
 } from "./libraries/SettlementLib.sol";
+import {ISomniaAgents} from "./interfaces/ISomniaAgents.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 // Layout of Contract:
 // version
@@ -86,6 +88,9 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     uint256 private constant MIN_LEAD_TIME = 5 minutes;
     uint256 private constant AMBIGUITY_BAND_MAX_BPS = 1000;
     uint256 private constant BPS_DENOMINATOR = 10000;
+    uint256 private constant LLM_DEPOSIT = 0.24 ether;
+    // TODO(Story 1.13): replace placeholder with actual LLM Inference agent ID from agents.testnet.somnia.network
+    uint256 private constant LLM_AGENT_ID = 0;
 
     address private immutable i_somniaAgents;
 
@@ -213,7 +218,196 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
         emit BetPlaced(marketId, msg.sender, side, msg.value);
     }
 
+    /// @notice Receive a result from the Somnia Agents platform and route to the correct handler.
+    /// @param requestId  The agent request ID returned by createRequest.
+    /// @param responses  Array of validator responses; decoded by handler stubs in 1.8/1.9.
+    /// @param status     Consensus status from the platform — Success, Failed, or TimedOut.
+    /// @param details    Original request details; opaque in this story.
+    /// @dev Reverts if caller is not the Somnia Agents platform contract.
+    ///      Clears pendingRequestId and pendingAgentType before dispatch to prevent double-callback.
+    function handleResponse(
+        uint256 requestId,
+        ISomniaAgents.Response[] memory responses,
+        ISomniaAgents.ResponseStatus status,
+        ISomniaAgents.Request memory details
+    ) external {
+        if (msg.sender != i_somniaAgents) revert PredictionMarket__OnlySomniaAgents();
+        details; // opaque in this story; never decoded — suppresses unused-parameter warning
+
+        uint256 marketId = s_requestToMarket[requestId];
+        if (marketId == 0) revert PredictionMarket__UnknownRequest();
+        if (s_markets[marketId].pendingRequestId != requestId) revert PredictionMarket__UnknownRequest();
+
+        AgentRequestType agentType = s_markets[marketId].pendingAgentType;
+        s_markets[marketId].pendingRequestId = 0;
+        s_markets[marketId].pendingAgentType = AgentRequestType.None;
+
+        if (agentType == AgentRequestType.JsonApi) {
+            _handleJsonResponse(marketId, requestId, responses, status);
+        } else {
+            _handleLlmResponse(marketId, requestId, responses, status);
+        }
+    }
+
     // ============ Internal Functions ============
+
+    /// @notice Decode a JSON API agent result, compare to threshold ± Ambiguity Band, and route.
+    /// @param marketId  The market being resolved (must be in Resolving state).
+    /// @param requestId The original agent request ID, forwarded to _settleMarket for the MarketResolved event.
+    /// @param responses Agent validator responses; responses[0].result is ABI-encoded uint256.
+    /// @param status    Consensus status — Failed/TimedOut transitions to Disputed; Success proceeds to decode.
+    /// @dev On agent failure: Resolving → Disputed, emits ResolutionFailed.
+    ///      Clear YES/NO: calls _settleMarket → Resolved.
+    ///      Ambiguous (in band): Resolving → LLMResolving; LLM invocation stubbed for Story 1.9.
+    function _handleJsonResponse(
+        uint256 marketId,
+        uint256 requestId,
+        ISomniaAgents.Response[] memory responses,
+        ISomniaAgents.ResponseStatus status
+    ) internal {
+        MarketLib.requireStatus(s_markets[marketId].status, MarketStatus.Resolving);
+
+        if (status != ISomniaAgents.ResponseStatus.Success) {
+            s_markets[marketId].status = MarketStatus.Disputed;
+            emit ResolutionFailed(marketId, uint8(status));
+            return;
+        }
+
+        uint256 fetchedValue = abi.decode(responses[0].result, (uint256));
+
+        uint256 threshold = s_markets[marketId].threshold;
+        uint256 ambiguityBandBps = s_markets[marketId].ambiguityBandBps;
+        uint256 bandLow = threshold - (threshold * ambiguityBandBps / BPS_DENOMINATOR);
+        uint256 bandHigh = threshold + (threshold * ambiguityBandBps / BPS_DENOMINATOR);
+
+        if (fetchedValue < bandLow) {
+            _settleMarket(marketId, Verdict.NO, requestId);
+        } else if (fetchedValue > bandHigh) {
+            _settleMarket(marketId, Verdict.YES, requestId);
+        } else {
+            s_markets[marketId].status = MarketStatus.LLMResolving;
+            _invokeLlm(marketId, fetchedValue);
+        }
+    }
+
+    /// @notice Construct a constrained inferString prompt and invoke the LLM Tiebreaker agent (FR-8).
+    /// @param marketId    The market in LLMResolving state.
+    /// @param fetchedValue The JSON API value that landed in the ambiguity band, used in the prompt.
+    /// @dev allowedValues=["YES","NO","INVALID"] + chainOfThought=true + INVALID system instruction
+    ///      ensure the AI shows its work and can honestly signal inconclusive data (FR-8 philosophy).
+    ///      LLM_AGENT_ID is a placeholder; replace with the real ID from agents.testnet.somnia.network
+    ///      before testnet deployment (Story 1.13).
+    function _invokeLlm(uint256 marketId, uint256 fetchedValue) internal {
+        Market storage market = s_markets[marketId];
+
+        string[] memory allowedValues = new string[](3);
+        allowedValues[0] = "YES";
+        allowedValues[1] = "NO";
+        allowedValues[2] = "INVALID";
+
+        uint256 threshold = market.threshold;
+        uint256 bandBps = market.ambiguityBandBps;
+        uint256 bandLow = threshold - (threshold * bandBps / BPS_DENOMINATOR);
+        uint256 bandHigh = threshold + (threshold * bandBps / BPS_DENOMINATOR);
+
+        string memory prompt = string.concat(
+            "Market question: ",
+            market.question,
+            "\n\nA data source returned the value ",
+            Strings.toString(fetchedValue),
+            ".\nThe market threshold is ",
+            Strings.toString(threshold),
+            ".\nThe ambiguity band spans ",
+            Strings.toString(bandLow),
+            " to ",
+            Strings.toString(bandHigh),
+            " (",
+            Strings.toString(bandBps),
+            " bps).\nThe fetched value falls within this band.\n\nRespond YES if the market condition is clearly met, NO if clearly not met, or INVALID if the evidence is genuinely ambiguous."
+        );
+
+        string memory system =
+            "You are an objective market resolution oracle. INVALID is a first-class verdict that triggers a full refund to all bettors when the data is genuinely ambiguous or insufficient to decide clearly. Do not guess; choose INVALID when uncertain.";
+
+        bytes memory payload =
+            abi.encodeWithSignature("inferString(string,string,bool,string[])", prompt, system, true, allowedValues);
+
+        uint256 newRequestId = ISomniaAgents(i_somniaAgents).createRequest{value: LLM_DEPOSIT}(
+            LLM_AGENT_ID, address(this), this.handleResponse.selector, payload
+        );
+
+        s_requestToMarket[newRequestId] = marketId;
+        market.pendingRequestId = newRequestId;
+        market.pendingAgentType = AgentRequestType.Llm;
+    }
+
+    /// @notice Decode the LLM Tiebreaker verdict and finalize the market (FR-8, FR-9 complete).
+    /// @param marketId  The market being resolved (must be in LLMResolving state).
+    /// @param requestId The original LLM agent request ID forwarded to _settleMarket / MarketResolved.
+    /// @param responses Agent validator responses; responses[0].result is ABI-encoded string.
+    /// @param status    Consensus status — Failed/TimedOut transitions to Disputed; Success proceeds to decode.
+    /// @dev Verdict matching is case-sensitive via keccak256(bytes(...)) — allowedValues constraint ensures
+    ///      the LLM cannot produce an unexpected casing variant in normal operation.
+    ///      Unknown string (should not occur) → Disputed so bettors can refund (NFR-5: no admin recovery path).
+    ///      [ARCHITECTURE-DECISION] Unknown verdict falls to Disputed rather than hanging: Somi has no admin
+    ///      (NFR-5) so manual recovery is impossible; Disputed exposes refund() to all bettors via FR-11.
+    function _handleLlmResponse(
+        uint256 marketId,
+        uint256 requestId,
+        ISomniaAgents.Response[] memory responses,
+        ISomniaAgents.ResponseStatus status
+    ) internal {
+        MarketLib.requireStatus(s_markets[marketId].status, MarketStatus.LLMResolving);
+
+        if (status != ISomniaAgents.ResponseStatus.Success) {
+            s_markets[marketId].status = MarketStatus.Disputed;
+            emit ResolutionFailed(marketId, uint8(status));
+            return;
+        }
+
+        string memory verdict = abi.decode(responses[0].result, (string));
+
+        if (keccak256(bytes(verdict)) == keccak256(bytes("YES"))) {
+            _settleMarket(marketId, Verdict.YES, requestId);
+        } else if (keccak256(bytes(verdict)) == keccak256(bytes("NO"))) {
+            _settleMarket(marketId, Verdict.NO, requestId);
+        } else if (keccak256(bytes(verdict)) == keccak256(bytes("INVALID"))) {
+            s_markets[marketId].status = MarketStatus.Refunded;
+            s_markets[marketId].verdict = Verdict.INVALID;
+            s_markets[marketId].resolvedAt = uint64(block.timestamp);
+            emit MarketResolved(marketId, Verdict.INVALID, 0, 0, requestId);
+        } else {
+            // [ARCHITECTURE-DECISION] Unknown verdict despite allowedValues constraint.
+            // Somi has no admin (NFR-5) so manual recovery is impossible; Disputed lets bettors refund via FR-11.
+            s_markets[marketId].status = MarketStatus.Disputed;
+            emit ResolutionFailed(marketId, uint8(ISomniaAgents.ResponseStatus.Success));
+        }
+    }
+
+    /// @notice Record verdict, mark market Resolved, and emit MarketResolved (FR-9).
+    /// @param marketId  The market to settle.
+    /// @param verdict   YES or NO — INVALID verdict is written directly by _handleLlmResponse (Story 1.9).
+    /// @param requestId Original agent request ID emitted in MarketResolved for off-chain receipt URL construction (AR-7, Decision 5).
+    /// @dev Called from _handleJsonResponse (Resolving → Resolved) and from _handleLlmResponse (Story 1.9, LLMResolving → Resolved).
+    ///      Callers validate the prior status before invoking; no requireStatus guard here.
+    ///      Settlement occurs in the same block as the triggering reactivity event (NFR-2, same-block guarantee).
+    function _settleMarket(uint256 marketId, Verdict verdict, uint256 requestId) internal {
+        s_markets[marketId].status = MarketStatus.Resolved;
+        s_markets[marketId].verdict = verdict;
+        s_markets[marketId].resolvedAt = uint64(block.timestamp);
+
+        uint256 winningPool;
+        uint256 losingPool;
+        if (verdict == Verdict.YES) {
+            winningPool = s_markets[marketId].yesPool;
+            losingPool = s_markets[marketId].noPool;
+        } else {
+            winningPool = s_markets[marketId].noPool;
+            losingPool = s_markets[marketId].yesPool;
+        }
+
+        emit MarketResolved(marketId, verdict, winningPool, losingPool, requestId);
+    }
 
     /// @inheritdoc SomniaEventHandler
     function _onEvent(address, bytes32[] calldata, bytes calldata) internal override {
