@@ -4,7 +4,14 @@ pragma solidity ^0.8.30;
 // ============ Imports ============
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {SomniaEventHandler} from "@somnia-chain/reactivity-contracts/contracts/SomniaEventHandler.sol";
-import {MarketLib, MarketStatus, Verdict, AgentRequestType} from "./libraries/MarketLib.sol";
+import {SomniaExtensions} from "@somnia-chain/reactivity-contracts/contracts/interfaces/SomniaExtensions.sol";
+import {
+    MarketLib,
+    MarketStatus,
+    Verdict,
+    AgentRequestType,
+    PredictionMarket__InvalidStateTransition
+} from "./libraries/MarketLib.sol";
 import {
     SettlementLib,
     PredictionMarket__NotWinningPosition,
@@ -58,6 +65,7 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     error PredictionMarket__AlreadyRefunded();
     error PredictionMarket__UnknownRequest();
     error PredictionMarket__InvalidSide();
+    error PredictionMarket__TransferFailed();
 
     // ============ Type declarations ============
 
@@ -91,6 +99,9 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     uint256 private constant LLM_DEPOSIT = 0.24 ether;
     // TODO(Story 1.13): replace placeholder with actual LLM Inference agent ID from agents.testnet.somnia.network
     uint256 private constant LLM_AGENT_ID = 0;
+    // TODO(Story 1.13): replace with actual JSON API agent ID from agents.testnet.somnia.network
+    uint256 private constant JSON_AGENT_ID = 0;
+    uint256 private constant JSON_DEPOSIT = 0.12 ether;
 
     address private immutable i_somniaAgents;
 
@@ -100,6 +111,7 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     mapping(uint256 => mapping(address => bool)) private s_refunded;
     mapping(uint256 => uint256) private s_requestToMarket;
     uint256 private s_marketCount;
+    mapping(uint256 => uint256) private s_subscriptionToMarket;
 
     // ============ Events ============
 
@@ -189,7 +201,12 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
 
         emit MarketCreated(marketId, msg.sender, question, resolutionTime);
 
-        // TODO(Story 1.11): scheduleSubscriptionAtTimestamp
+        uint256 subscriptionId = SomniaExtensions.scheduleSubscriptionAtTimestamp(
+            address(this), uint256(resolutionTime) * 1000, SomniaExtensions.defaultSubscriptionOptions()
+        );
+        s_markets[marketId].subscriptionId = subscriptionId;
+        s_subscriptionToMarket[subscriptionId] = marketId;
+        emit ResolutionScheduled(marketId, subscriptionId, resolutionTime);
 
         if (address(this).balance < LOW_BALANCE_THRESHOLD) {
             emit LowReactivityBalance(address(this).balance);
@@ -247,6 +264,71 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
         } else {
             _handleLlmResponse(marketId, requestId, responses, status);
         }
+    }
+
+    /// @notice Withdraw winnings from a resolved market.
+    /// @param marketId The resolved market to claim from.
+    /// @dev Reverts: InvalidStateTransition (not Resolved), AlreadyClaimed, NotWinningPosition (wrong/no side).
+    ///      CEI enforced — s_claimed set before ETH transfer. nonReentrant for belt-and-suspenders defense.
+    ///      ETH transfer via low-level .call; reverts TransferFailed on rejection (e.g. contract without receive).
+    ///      Payout formula: (myWinningStake * losingPool) / winningPool + myWinningStake — see SettlementLib.
+    function claim(uint256 marketId) external nonReentrant {
+        Market storage market = s_markets[marketId];
+        MarketLib.requireStatus(market.status, MarketStatus.Resolved);
+        if (s_claimed[marketId][msg.sender]) revert PredictionMarket__AlreadyClaimed();
+
+        uint8 winningSide;
+        uint256 winningPool;
+        uint256 losingPool;
+        if (market.verdict == Verdict.YES) {
+            winningSide = 0;
+            winningPool = market.yesPool;
+            losingPool = market.noPool;
+        } else {
+            winningSide = 1;
+            winningPool = market.noPool;
+            losingPool = market.yesPool;
+        }
+
+        uint256 myWinningStake = s_bets[marketId][msg.sender][winningSide];
+        uint256 payout = SettlementLib.calculatePayout(myWinningStake, winningPool, losingPool);
+
+        // CEI: state before transfer
+        s_claimed[marketId][msg.sender] = true;
+
+        (bool ok,) = msg.sender.call{value: payout}("");
+        if (!ok) revert PredictionMarket__TransferFailed();
+
+        emit Claimed(marketId, msg.sender, payout);
+    }
+
+    /// @notice Recover full stake from an INVALID or Disputed market.
+    /// @param marketId The INVALID/Disputed market to refund from.
+    /// @dev Reverts: InvalidStateTransition (not Refunded/Disputed), AlreadyRefunded, NotRefundable (no bets).
+    ///      [ARCHITECTURE-DECISION] Status check uses isRefundable (accepts both Refunded+INVALID and Disputed+Unset)
+    ///      so requireStatus cannot be used (it checks a single expected value). The error uses Refunded as
+    ///      the "expected" argument to convey "must be in a refundable state" — semantic imprecision is
+    ///      justified by avoiding a new error solely for this case. Both end-states use the identical code path:
+    ///      the verdict+status pair difference is preserved in storage for the frontend to distinguish (UX-DR9).
+    ///      CEI enforced — s_refunded set before ETH transfer. nonReentrant guards value transfer.
+    function refund(uint256 marketId) external nonReentrant {
+        Market storage market = s_markets[marketId];
+        if (!MarketLib.isRefundable(market.status, market.verdict)) {
+            revert PredictionMarket__InvalidStateTransition(market.status, MarketStatus.Refunded);
+        }
+        if (s_refunded[marketId][msg.sender]) revert PredictionMarket__AlreadyRefunded();
+
+        uint256 myYesStake = s_bets[marketId][msg.sender][0];
+        uint256 myNoStake = s_bets[marketId][msg.sender][1];
+        uint256 refundAmount = SettlementLib.calculateRefund(myYesStake, myNoStake);
+
+        // CEI: state before transfer
+        s_refunded[marketId][msg.sender] = true;
+
+        (bool ok,) = msg.sender.call{value: refundAmount}("");
+        if (!ok) revert PredictionMarket__TransferFailed();
+
+        emit Refunded(marketId, msg.sender, refundAmount);
     }
 
     // ============ Internal Functions ============
@@ -409,9 +491,38 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
         emit MarketResolved(marketId, verdict, winningPool, losingPool, requestId);
     }
 
-    /// @inheritdoc SomniaEventHandler
-    function _onEvent(address, bytes32[] calldata, bytes calldata) internal override {
-        // TODO(Story 1.11): implement reactivity callback
+    /// @notice Autonomous resolution trigger — fires in the same block as `resolutionTime` (NFR-2 same-block guarantee).
+    /// @dev Somnia precompile packs `abi.encode(subscriptionId)` into `data` for scheduled callbacks.
+    ///      Reverse-lookup: s_subscriptionToMarket[subscriptionId] → marketId.
+    ///      Graceful-fail path: if balance < JSON_DEPOSIT, emits ResolutionDeferred and returns with NO
+    ///      state mutation — the market stays Open and will never auto-resolve (NFR-5 no-admin caveat).
+    ///      Status guard (requireStatus Open) prevents a duplicate callback from corrupting a market
+    ///      already in Resolving/LLMResolving state (should not occur with one-shot subscriptions).
+    function _onEvent(address, bytes32[] calldata, bytes calldata data) internal override {
+        uint256 subscriptionId = abi.decode(data, (uint256));
+        uint256 marketId = s_subscriptionToMarket[subscriptionId];
+
+        if (address(this).balance < JSON_DEPOSIT) {
+            emit ResolutionDeferred(marketId);
+            return;
+        }
+
+        Market storage market = s_markets[marketId];
+        MarketLib.requireStatus(market.status, MarketStatus.Open);
+        market.status = MarketStatus.Resolving;
+
+        bytes memory payload =
+            abi.encodeWithSignature("fetchUint(string,string,uint8)", market.dataSource, market.jsonSelector, uint8(0));
+
+        uint256 requestId = ISomniaAgents(i_somniaAgents).createRequest{value: JSON_DEPOSIT}(
+            JSON_AGENT_ID, address(this), this.handleResponse.selector, payload
+        );
+
+        s_requestToMarket[requestId] = marketId;
+        market.pendingRequestId = requestId;
+        market.pendingAgentType = AgentRequestType.JsonApi;
+
+        emit ResolutionInitiated(marketId, requestId);
     }
 
     // ============ View Functions ============

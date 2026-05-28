@@ -3,14 +3,29 @@ pragma solidity ^0.8.30;
 
 import {Test, Vm} from "forge-std/Test.sol";
 import {PredictionMarket} from "../src/PredictionMarket.sol";
-import {MarketStatus, Verdict, AgentRequestType} from "../src/libraries/MarketLib.sol";
+import {
+    MarketStatus,
+    Verdict,
+    AgentRequestType,
+    PredictionMarket__InvalidStateTransition
+} from "../src/libraries/MarketLib.sol";
+import {
+    PredictionMarket__NotWinningPosition, PredictionMarket__NotRefundable
+} from "../src/libraries/SettlementLib.sol";
 import {ISomniaAgents} from "../src/interfaces/ISomniaAgents.sol";
 import {MockSomniaAgents} from "./mocks/MockSomniaAgents.sol";
+import {SomniaEventHandler} from "@somnia-chain/reactivity-contracts/contracts/SomniaEventHandler.sol";
+import {SomniaExtensions} from "@somnia-chain/reactivity-contracts/contracts/interfaces/SomniaExtensions.sol";
+import {ISomniaReactivityPrecompile} from
+    "@somnia-chain/reactivity-contracts/contracts/interfaces/ISomniaReactivityPrecompile.sol";
+import {MockSomniaReactivityPrecompile} from "./mocks/MockSomniaReactivityPrecompile.sol";
 
 contract PredictionMarketTest is Test {
     PredictionMarket private s_pm;
     MockSomniaAgents private s_mockAgents;
+    bool private s_usingMockPrecompile;
     address private constant MOCK_AGENTS = address(0xA9E5);
+    address private constant PRECOMPILE = address(0x0100);
 
     uint256 private constant RESERVE_FLOOR = 32 ether;
     uint256 private constant LOW_BALANCE_THRESHOLD = 35 ether;
@@ -26,6 +41,13 @@ contract PredictionMarketTest is Test {
     uint256 private constant BET_AMOUNT = 5 ether;
 
     function setUp() public {
+        // Etch mock precompile at 0x0100 only in unit-test mode (not on Somnia fork)
+        if (PRECOMPILE.code.length == 0) {
+            s_usingMockPrecompile = true;
+            address mockPrecompile = address(new MockSomniaReactivityPrecompile());
+            vm.etch(PRECOMPILE, mockPrecompile.code);
+        }
+
         // Step 1: deploy mock with placeholder to break the chicken-and-egg dependency
         s_mockAgents = new MockSomniaAgents(address(0));
         // Step 2: deploy PM with mock's address as the agents contract
@@ -34,6 +56,8 @@ contract PredictionMarketTest is Test {
         s_mockAgents.setTarget(address(s_pm));
     }
 
+    receive() external payable {}
+
     // ============ Happy Path ============
 
     function test_CreateMarket_HappyPath() public {
@@ -41,6 +65,9 @@ contract PredictionMarketTest is Test {
 
         vm.expectEmit(true, true, false, true, address(s_pm));
         emit PredictionMarket.MarketCreated(1, address(this), QUESTION, resolutionTime);
+
+        vm.expectEmit(true, false, false, true, address(s_pm));
+        emit PredictionMarket.ResolutionScheduled(1, 1, resolutionTime); // subscriptionId = 1 from mock
 
         uint256 marketId = s_pm.createMarket(QUESTION, DATA_SOURCE, JSON_SELECTOR, THRESHOLD, resolutionTime, BAND_BPS);
 
@@ -60,7 +87,7 @@ contract PredictionMarketTest is Test {
         assertEq(uint8(m.status), uint8(MarketStatus.Open));
         assertEq(uint8(m.verdict), uint8(Verdict.Unset));
         assertEq(uint8(m.pendingAgentType), uint8(AgentRequestType.None));
-        assertEq(m.subscriptionId, 0);
+        assertEq(m.subscriptionId, 1); // mock returns 1 for first subscription
         assertEq(m.pendingRequestId, 0);
         assertEq(m.resolvedAt, 0);
     }
@@ -308,7 +335,7 @@ contract PredictionMarketTest is Test {
     /// @dev Seeds s_requestToMarket[requestId] = marketId and sets market's pending fields via vm.store.
     ///      Slot layout (non-constant, non-immutable state vars in order):
     ///        slot 0: s_markets, slot 1: s_bets, slot 2: s_claimed, slot 3: s_refunded,
-    ///        slot 4: s_requestToMarket, slot 5: s_marketCount
+    ///        slot 4: s_requestToMarket, slot 5: s_marketCount, slot 6: s_subscriptionToMarket
     ///      Market struct field offsets (dynamic strings count as 1 slot each):
     ///        +0 id, +1 creator, +2 question, +3 dataSource, +4 jsonSelector,
     ///        +5 threshold, +6 ambiguityBandBps, +7 resolutionTime, +8 yesPool, +9 noPool,
@@ -344,6 +371,31 @@ contract PredictionMarketTest is Test {
         bytes32 marketBase = keccak256(abi.encode(marketId, uint256(0)));
         bytes32 statusSlot = bytes32(uint256(marketBase) + 10);
         vm.store(address(s_pm), statusSlot, bytes32(uint256(2))); // LLMResolving=2
+    }
+
+    /// @dev Creates a market in Resolved state with a given verdict.
+    ///      status=Resolved(3), verdict packed into byte 1 of slot +10.
+    function _seedResolvedMarket(Verdict verdict) internal returns (uint256 marketId) {
+        (marketId,) = _createDefaultMarket();
+        bytes32 marketBase = keccak256(abi.encode(marketId, uint256(0)));
+        bytes32 statusSlot = bytes32(uint256(marketBase) + 10);
+        // Pack: byte 0 = status(Resolved=3), byte 1 = verdict
+        vm.store(address(s_pm), statusSlot, bytes32(uint256(3) | (uint256(uint8(verdict)) << 8)));
+    }
+
+    /// @dev Creates a market in Refunded (INVALID) or Disputed state.
+    ///      Refunded+INVALID: status=4, verdict=3. Disputed+Unset: status=5, verdict=0.
+    function _seedRefundableMarket(bool isINVALID) internal returns (uint256 marketId) {
+        (marketId,) = _createDefaultMarket();
+        bytes32 marketBase = keccak256(abi.encode(marketId, uint256(0)));
+        bytes32 statusSlot = bytes32(uint256(marketBase) + 10);
+        if (isINVALID) {
+            // Refunded=4, INVALID verdict=3
+            vm.store(address(s_pm), statusSlot, bytes32(uint256(4) | (uint256(3) << 8)));
+        } else {
+            // Disputed=5, Unset verdict=0
+            vm.store(address(s_pm), statusSlot, bytes32(uint256(5)));
+        }
     }
 
     // ============ handleResponse Tests ============
@@ -643,5 +695,424 @@ contract PredictionMarketTest is Test {
 
         PredictionMarket.Market memory m = s_pm.getMarket(marketId);
         assertEq(uint8(m.status), uint8(MarketStatus.Disputed));
+    }
+
+    // ============ claim Tests ============
+
+    function test_Claim_YES_HappyPath() public {
+        uint256 marketId = _seedResolvedMarket(Verdict.YES);
+
+        // Seed YES bet (side=0)
+        bytes32 betSlot = keccak256(
+            abi.encode(uint256(0), keccak256(abi.encode(address(this), keccak256(abi.encode(marketId, uint256(1))))))
+        );
+        vm.store(address(s_pm), betSlot, bytes32(BET_AMOUNT));
+
+        // Seed yesPool + noPool in market struct
+        bytes32 marketBase = keccak256(abi.encode(marketId, uint256(0)));
+        vm.store(address(s_pm), bytes32(uint256(marketBase) + 8), bytes32(BET_AMOUNT)); // yesPool
+        vm.store(address(s_pm), bytes32(uint256(marketBase) + 9), bytes32(uint256(2 ether))); // noPool
+
+        vm.deal(address(s_pm), 50 ether);
+
+        uint256 balanceBefore = address(this).balance;
+
+        vm.expectEmit(true, true, false, true, address(s_pm));
+        emit PredictionMarket.Claimed(marketId, address(this), BET_AMOUNT + 2 ether);
+
+        s_pm.claim(marketId);
+
+        // payout = (5e18 * 2e18) / 5e18 + 5e18 = 7e18
+        assertEq(address(this).balance - balanceBefore, BET_AMOUNT + 2 ether);
+        assertTrue(s_pm.getMarket(marketId).status == MarketStatus.Resolved);
+    }
+
+    function test_Claim_NO_HappyPath() public {
+        uint256 marketId = _seedResolvedMarket(Verdict.NO);
+
+        // Seed NO bet (side=1)
+        bytes32 betSlot = keccak256(
+            abi.encode(uint256(1), keccak256(abi.encode(address(this), keccak256(abi.encode(marketId, uint256(1))))))
+        );
+        vm.store(address(s_pm), betSlot, bytes32(BET_AMOUNT));
+
+        bytes32 marketBase = keccak256(abi.encode(marketId, uint256(0)));
+        vm.store(address(s_pm), bytes32(uint256(marketBase) + 8), bytes32(uint256(1 ether))); // yesPool
+        vm.store(address(s_pm), bytes32(uint256(marketBase) + 9), bytes32(BET_AMOUNT)); // noPool
+
+        vm.deal(address(s_pm), 50 ether);
+        uint256 balanceBefore = address(this).balance;
+
+        s_pm.claim(marketId);
+
+        // payout = (5e18 * 1e18) / 5e18 + 5e18 = 6e18
+        assertEq(address(this).balance - balanceBefore, BET_AMOUNT + 1 ether);
+    }
+
+    function test_Claim_RevertsWhenNotResolved() public {
+        (uint256 marketId,) = _createDefaultMarket(); // status = Open (0)
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PredictionMarket__InvalidStateTransition.selector, MarketStatus.Open, MarketStatus.Resolved
+            )
+        );
+        s_pm.claim(marketId);
+    }
+
+    function test_Claim_RevertsOnAlreadyClaimed() public {
+        uint256 marketId = _seedResolvedMarket(Verdict.YES);
+
+        // Seed a YES bet and pool
+        bytes32 betSlot = keccak256(
+            abi.encode(uint256(0), keccak256(abi.encode(address(this), keccak256(abi.encode(marketId, uint256(1))))))
+        );
+        vm.store(address(s_pm), betSlot, bytes32(BET_AMOUNT));
+        bytes32 marketBase = keccak256(abi.encode(marketId, uint256(0)));
+        vm.store(address(s_pm), bytes32(uint256(marketBase) + 8), bytes32(BET_AMOUNT));
+        vm.deal(address(s_pm), 50 ether);
+
+        s_pm.claim(marketId); // first claim succeeds
+
+        vm.expectRevert(PredictionMarket.PredictionMarket__AlreadyClaimed.selector);
+        s_pm.claim(marketId); // second claim reverts
+    }
+
+    function test_Claim_RevertsOnLosingPosition() public {
+        uint256 marketId = _seedResolvedMarket(Verdict.YES); // YES wins
+
+        // Seed a NO bet only (loser)
+        bytes32 betSlot = keccak256(
+            abi.encode(
+                uint256(1), // NO side
+                keccak256(abi.encode(address(this), keccak256(abi.encode(marketId, uint256(1)))))
+            )
+        );
+        vm.store(address(s_pm), betSlot, bytes32(BET_AMOUNT));
+        bytes32 marketBase = keccak256(abi.encode(marketId, uint256(0)));
+        vm.store(address(s_pm), bytes32(uint256(marketBase) + 8), bytes32(uint256(1 ether))); // yesPool (someone else)
+        vm.store(address(s_pm), bytes32(uint256(marketBase) + 9), bytes32(BET_AMOUNT)); // noPool
+
+        // Caller has no YES stake → calculatePayout reverts NotWinningPosition
+        vm.expectRevert(PredictionMarket__NotWinningPosition.selector);
+        s_pm.claim(marketId);
+    }
+
+    function test_Claim_RevertsOnLosingPositionWhenNoWins() public {
+        uint256 marketId = _seedResolvedMarket(Verdict.NO); // NO wins
+
+        // Seed a YES bet only (loser)
+        bytes32 betSlot = keccak256(
+            abi.encode(
+                uint256(0), // YES side
+                keccak256(abi.encode(address(this), keccak256(abi.encode(marketId, uint256(1)))))
+            )
+        );
+        vm.store(address(s_pm), betSlot, bytes32(BET_AMOUNT));
+        bytes32 marketBase = keccak256(abi.encode(marketId, uint256(0)));
+        vm.store(address(s_pm), bytes32(uint256(marketBase) + 8), bytes32(BET_AMOUNT)); // yesPool
+        vm.store(address(s_pm), bytes32(uint256(marketBase) + 9), bytes32(uint256(1 ether))); // noPool (someone else)
+
+        // Caller has no NO stake → calculatePayout reverts NotWinningPosition
+        vm.expectRevert(PredictionMarket__NotWinningPosition.selector);
+        s_pm.claim(marketId);
+    }
+
+    // ============ refund Tests ============
+
+    function test_Refund_INVALID_HappyPath() public {
+        uint256 marketId = _seedRefundableMarket(true); // Refunded+INVALID
+
+        bytes32 yesBetSlot = keccak256(
+            abi.encode(uint256(0), keccak256(abi.encode(address(this), keccak256(abi.encode(marketId, uint256(1))))))
+        );
+        bytes32 noBetSlot = keccak256(
+            abi.encode(uint256(1), keccak256(abi.encode(address(this), keccak256(abi.encode(marketId, uint256(1))))))
+        );
+        vm.store(address(s_pm), yesBetSlot, bytes32(uint256(3 ether)));
+        vm.store(address(s_pm), noBetSlot, bytes32(uint256(2 ether)));
+        vm.deal(address(s_pm), 50 ether);
+
+        uint256 balanceBefore = address(this).balance;
+
+        vm.expectEmit(true, true, false, true, address(s_pm));
+        emit PredictionMarket.Refunded(marketId, address(this), 5 ether);
+
+        s_pm.refund(marketId);
+
+        assertEq(address(this).balance - balanceBefore, 5 ether);
+    }
+
+    function test_Refund_Disputed_HappyPath() public {
+        uint256 marketId = _seedRefundableMarket(false); // Disputed+Unset
+
+        bytes32 yesBetSlot = keccak256(
+            abi.encode(uint256(0), keccak256(abi.encode(address(this), keccak256(abi.encode(marketId, uint256(1))))))
+        );
+        vm.store(address(s_pm), yesBetSlot, bytes32(BET_AMOUNT));
+        vm.deal(address(s_pm), 50 ether);
+
+        uint256 balanceBefore = address(this).balance;
+        s_pm.refund(marketId);
+
+        assertEq(address(this).balance - balanceBefore, BET_AMOUNT);
+    }
+
+    function test_Refund_BothSides() public {
+        uint256 marketId = _seedRefundableMarket(true);
+
+        bytes32 yesBetSlot = keccak256(
+            abi.encode(uint256(0), keccak256(abi.encode(address(this), keccak256(abi.encode(marketId, uint256(1))))))
+        );
+        bytes32 noBetSlot = keccak256(
+            abi.encode(uint256(1), keccak256(abi.encode(address(this), keccak256(abi.encode(marketId, uint256(1))))))
+        );
+        vm.store(address(s_pm), yesBetSlot, bytes32(uint256(3 ether)));
+        vm.store(address(s_pm), noBetSlot, bytes32(uint256(4 ether)));
+        vm.deal(address(s_pm), 50 ether);
+
+        uint256 balanceBefore = address(this).balance;
+        s_pm.refund(marketId);
+
+        assertEq(address(this).balance - balanceBefore, 7 ether);
+    }
+
+    function test_Refund_RevertsWhenResolved() public {
+        uint256 marketId = _seedResolvedMarket(Verdict.YES); // Resolved — not refundable
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PredictionMarket__InvalidStateTransition.selector, MarketStatus.Resolved, MarketStatus.Refunded
+            )
+        );
+        s_pm.refund(marketId);
+    }
+
+    function test_Refund_RevertsWhenOpenResolvingOrLLMResolving() public {
+        (uint256 openMarketId,) = _createDefaultMarket();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PredictionMarket__InvalidStateTransition.selector, MarketStatus.Open, MarketStatus.Refunded
+            )
+        );
+        s_pm.refund(openMarketId);
+
+        uint256 resolvingMarketId = _seedResolvingMarket(101);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PredictionMarket__InvalidStateTransition.selector, MarketStatus.Resolving, MarketStatus.Refunded
+            )
+        );
+        s_pm.refund(resolvingMarketId);
+
+        uint256 llmResolvingMarketId = _seedLLMResolvingMarket(102);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PredictionMarket__InvalidStateTransition.selector, MarketStatus.LLMResolving, MarketStatus.Refunded
+            )
+        );
+        s_pm.refund(llmResolvingMarketId);
+    }
+
+    function test_Refund_RevertsOnAlreadyRefunded() public {
+        uint256 marketId = _seedRefundableMarket(true);
+
+        bytes32 yesBetSlot = keccak256(
+            abi.encode(uint256(0), keccak256(abi.encode(address(this), keccak256(abi.encode(marketId, uint256(1))))))
+        );
+        vm.store(address(s_pm), yesBetSlot, bytes32(BET_AMOUNT));
+        vm.deal(address(s_pm), 50 ether);
+
+        s_pm.refund(marketId); // first succeeds
+
+        vm.expectRevert(PredictionMarket.PredictionMarket__AlreadyRefunded.selector);
+        s_pm.refund(marketId); // second reverts
+    }
+
+    function test_Refund_RevertsOnNoBet() public {
+        uint256 marketId = _seedRefundableMarket(true); // no bets seeded
+
+        vm.expectRevert(PredictionMarket__NotRefundable.selector);
+        s_pm.refund(marketId);
+    }
+
+    // ============ Fuzz Tests — claim & refund ============
+
+    function testFuzz_Claim_PreservesPotConservation(uint256 yesStake1, uint256 yesStake2, uint256 noStake) public {
+        yesStake1 = bound(yesStake1, MIN_BET, 50 ether);
+        yesStake2 = bound(yesStake2, MIN_BET, 50 ether);
+        noStake = bound(noStake, 0, 50 ether); // noPool may be zero
+
+        (uint256 marketId,) = _createDefaultMarket();
+
+        address bettor1 = address(0x1001);
+        address bettor2 = address(0x1002);
+        address noBettor = address(0x1003);
+
+        vm.deal(bettor1, yesStake1);
+        vm.deal(bettor2, yesStake2);
+        vm.deal(noBettor, noStake + 1 ether);
+
+        vm.prank(bettor1);
+        s_pm.placeBet{value: yesStake1}(marketId, 0); // YES
+
+        vm.prank(bettor2);
+        s_pm.placeBet{value: yesStake2}(marketId, 0); // YES
+
+        if (noStake >= MIN_BET) {
+            vm.prank(noBettor);
+            s_pm.placeBet{value: noStake}(marketId, 1); // NO
+        }
+
+        // Settle: Resolved + YES via vm.store
+        bytes32 marketBase = keccak256(abi.encode(marketId, uint256(0)));
+        bytes32 statusSlot = bytes32(uint256(marketBase) + 10);
+        vm.store(address(s_pm), statusSlot, bytes32(uint256(3) | (uint256(1) << 8)));
+
+        PredictionMarket.Market memory m = s_pm.getMarket(marketId);
+        uint256 totalPot = m.yesPool + m.noPool;
+
+        uint256 b1Before = bettor1.balance;
+        uint256 b2Before = bettor2.balance;
+
+        vm.prank(bettor1);
+        s_pm.claim(marketId);
+        vm.prank(bettor2);
+        s_pm.claim(marketId);
+
+        uint256 payout1 = bettor1.balance - b1Before;
+        uint256 payout2 = bettor2.balance - b2Before;
+        uint256 totalPayout = payout1 + payout2;
+
+        // Pot conservation: total paid out never exceeds total staked
+        assertLe(totalPayout, totalPot, "payouts must not exceed total pot");
+        // Dust from integer division: at most (numWinners - 1) wei remains
+        assertGe(totalPayout + 1, totalPot > 0 ? totalPot - 1 : 0, "excessive dust in contract");
+    }
+
+    // ============ _onEvent Tests ============
+
+    function test_OnEvent_OpenToResolving_HappyPath() public {
+        (uint256 marketId,) = _createDefaultMarket();
+        uint256 subscriptionId = s_pm.getMarket(marketId).subscriptionId; // = 1 from mock
+
+        // First createRequest in this test returns requestId = 1 (s_mockAgents.s_nextRequestId = 1)
+        vm.expectEmit(true, true, false, false, address(s_pm));
+        emit PredictionMarket.ResolutionInitiated(marketId, 1);
+
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = ISomniaReactivityPrecompile.Schedule.selector;
+        topics[1] = bytes32(uint256(s_pm.getMarket(marketId).resolutionTime) * 1000);
+
+        vm.prank(PRECOMPILE);
+        s_pm.onEvent(PRECOMPILE, topics, abi.encode(subscriptionId));
+
+        PredictionMarket.Market memory m = s_pm.getMarket(marketId);
+        assertEq(uint8(m.status), uint8(MarketStatus.Resolving));
+        assertEq(m.pendingRequestId, 1);
+        assertEq(uint8(m.pendingAgentType), uint8(AgentRequestType.JsonApi));
+    }
+
+    function test_OnEvent_EmitsResolutionDeferred_WhenInsufficientBalance() public {
+        (uint256 marketId,) = _createDefaultMarket();
+        uint256 subscriptionId = s_pm.getMarket(marketId).subscriptionId;
+
+        // Drain below JSON_DEPOSIT (0.12 ether)
+        vm.deal(address(s_pm), 0.05 ether);
+
+        vm.expectEmit(true, false, false, false, address(s_pm));
+        emit PredictionMarket.ResolutionDeferred(marketId);
+
+        vm.prank(PRECOMPILE);
+        s_pm.onEvent(PRECOMPILE, new bytes32[](0), abi.encode(subscriptionId));
+
+        // No state mutation — market stays Open
+        assertEq(uint8(s_pm.getMarket(marketId).status), uint8(MarketStatus.Open));
+        assertEq(s_pm.getMarket(marketId).pendingRequestId, 0);
+    }
+
+    function test_OnEvent_RevertsWhenNotPrecompile() public {
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(SomniaEventHandler.OnlyReactivityPrecompile.selector);
+        s_pm.onEvent(address(0), new bytes32[](0), "");
+    }
+
+    function test_ReactivityFlow_OpenToResolving_ForkTest() public {
+        // Skip when not running with a Somnia testnet fork
+        if (s_usingMockPrecompile) {
+            vm.skip(true);
+            return;
+        }
+        // On a Somnia fork, setUp does NOT etch the mock; real precompile at 0x0100 is used.
+        (uint256 marketId,) = _createDefaultMarket();
+
+        PredictionMarket.Market memory m = s_pm.getMarket(marketId);
+        assertGt(m.subscriptionId, 0); // real precompile returned a real subscriptionId
+
+        // Advance time past resolutionTime
+        vm.warp(m.resolutionTime + 1);
+
+        // Manually simulate the precompile callback (vm.warp does not auto-fire subscriptions)
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = ISomniaReactivityPrecompile.Schedule.selector;
+        topics[1] = bytes32(uint256(m.resolutionTime) * 1000);
+
+        vm.prank(PRECOMPILE);
+        s_pm.onEvent(PRECOMPILE, topics, abi.encode(m.subscriptionId));
+
+        assertEq(uint8(s_pm.getMarket(marketId).status), uint8(MarketStatus.Resolving));
+    }
+
+    // ============ Fuzz Tests — claim & refund ============
+
+    function testFuzz_Refund_SumEqualsTotalStaked(uint256 yesStake1, uint256 yesStake2, uint256 noStake1) public {
+        yesStake1 = bound(yesStake1, MIN_BET, 50 ether);
+        yesStake2 = bound(yesStake2, MIN_BET, 50 ether);
+        noStake1 = bound(noStake1, MIN_BET, 50 ether);
+
+        (uint256 marketId,) = _createDefaultMarket();
+
+        address bettor1 = address(0x2001);
+        address bettor2 = address(0x2002);
+        address bettor3 = address(0x2003);
+
+        vm.deal(bettor1, yesStake1);
+        vm.deal(bettor2, yesStake2);
+        vm.deal(bettor3, noStake1);
+
+        vm.prank(bettor1);
+        s_pm.placeBet{value: yesStake1}(marketId, 0);
+        vm.prank(bettor2);
+        s_pm.placeBet{value: yesStake2}(marketId, 0);
+        vm.prank(bettor3);
+        s_pm.placeBet{value: noStake1}(marketId, 1);
+
+        // Set to Refunded + INVALID
+        bytes32 marketBase = keccak256(abi.encode(marketId, uint256(0)));
+        bytes32 statusSlot = bytes32(uint256(marketBase) + 10);
+        vm.store(address(s_pm), statusSlot, bytes32(uint256(4) | (uint256(3) << 8)));
+
+        PredictionMarket.Market memory m = s_pm.getMarket(marketId);
+        uint256 totalStaked = m.yesPool + m.noPool;
+
+        uint256 b1Before = bettor1.balance;
+        uint256 b2Before = bettor2.balance;
+        uint256 b3Before = bettor3.balance;
+
+        vm.prank(bettor1);
+        s_pm.refund(marketId);
+        vm.prank(bettor2);
+        s_pm.refund(marketId);
+        vm.prank(bettor3);
+        s_pm.refund(marketId);
+
+        uint256 totalRefunded =
+            (bettor1.balance - b1Before) + (bettor2.balance - b2Before) + (bettor3.balance - b3Before);
+
+        // Refund is full-stake recovery; no integer division — exact equality
+        assertEq(totalRefunded, totalStaked, "total refunded must equal total staked");
     }
 }
