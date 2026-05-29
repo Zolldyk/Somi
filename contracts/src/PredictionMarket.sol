@@ -98,10 +98,8 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     uint256 private constant AMBIGUITY_BAND_MAX_BPS = 1000;
     uint256 private constant BPS_DENOMINATOR = 10000;
     uint256 private constant LLM_DEPOSIT = 0.24 ether;
-    // TODO(Story 1.13): replace placeholder with actual LLM Inference agent ID from agents.testnet.somnia.network
-    uint256 private constant LLM_AGENT_ID = 0;
-    // TODO(Story 1.13): replace with actual JSON API agent ID from agents.testnet.somnia.network
-    uint256 private constant JSON_AGENT_ID = 0;
+    uint256 private constant LLM_AGENT_ID = 12847293847561029384;
+    uint256 private constant JSON_AGENT_ID = 13174292974160097713;
     uint256 private constant JSON_DEPOSIT = 0.12 ether;
 
     address private immutable i_somniaAgents;
@@ -390,8 +388,6 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     /// @param fetchedValue The JSON API value that landed in the ambiguity band, used in the prompt.
     /// @dev allowedValues=["YES","NO","INVALID"] + chainOfThought=true + INVALID system instruction
     ///      ensure the AI shows its work and can honestly signal inconclusive data (FR-8 philosophy).
-    ///      LLM_AGENT_ID is a placeholder; replace with the real ID from agents.testnet.somnia.network
-    ///      before testnet deployment (Story 1.13).
     function _invokeLlm(uint256 marketId, uint256 fetchedValue) internal {
         Market storage market = s_markets[marketId];
 

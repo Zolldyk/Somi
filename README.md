@@ -51,6 +51,45 @@ cd contracts && forge coverage --report summary
 cd contracts && slither src/
 ```
 
+## Deployment
+
+### Contract → Somnia Testnet (chain 50312)
+
+```bash
+export SOMNIA_TESTNET_RPC=https://api.infra.testnet.somnia.network
+export SOMNIA_AGENTS_ADDR=0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776
+
+cd contracts && forge create \
+  --account somi-deployer \
+  --rpc-url $SOMNIA_TESTNET_RPC \
+  --broadcast \
+  --value 50ether \
+  src/PredictionMarket.sol:PredictionMarket \
+  --constructor-args $SOMNIA_AGENTS_ADDR
+```
+
+After deploy, copy the deployed address to `frontend/.env.local`:
+
+```
+NEXT_PUBLIC_CONTRACT_ADDRESS=<deployed_address>
+```
+
+### ABI Sync
+
+Re-run after any contract interface change (AR-16 discipline — commit ABI and contract source together):
+
+```bash
+cd contracts && forge inspect PredictionMarket abi > ../frontend/lib/abi.json
+```
+
+### Frontend → Vercel
+
+```bash
+cd frontend
+vercel link    # one-time
+vercel --prod  # subsequent deploys (or auto on git push to main)
+```
+
 ## Key Management
 
 Private keys must **never** appear in `.env`, `.env.example`, or any committed file.
