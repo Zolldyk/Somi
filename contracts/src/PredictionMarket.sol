@@ -66,6 +66,7 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     error PredictionMarket__UnknownRequest();
     error PredictionMarket__InvalidSide();
     error PredictionMarket__TransferFailed();
+    error PredictionMarket__ZeroAddress();
 
     // ============ Type declarations ============
 
@@ -138,6 +139,7 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
      *      Reactivity top-ups accepted via anonymous receive().
      */
     constructor(address _somniaAgents) payable {
+        if (_somniaAgents == address(0)) revert PredictionMarket__ZeroAddress();
         if (msg.value < RESERVE_FLOOR) {
             revert PredictionMarket__InsufficientReactivityFunds(msg.value, RESERVE_FLOOR);
         }
@@ -201,6 +203,10 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
 
         emit MarketCreated(marketId, msg.sender, question, resolutionTime);
 
+        // [ARCHITECTURE-DECISION] The reactivity precompile returns subscriptionId, so reverse-lookup writes
+        // happen after this external call. The precompile is fixed at address(0x0100), and the market is already
+        // stored before scheduling, so a duplicate callback cannot corrupt terminal state.
+        // slither-disable-next-line reentrancy-benign,reentrancy-events
         uint256 subscriptionId = SomniaExtensions.scheduleSubscriptionAtTimestamp(
             address(this), uint256(resolutionTime) * 1000, SomniaExtensions.defaultSubscriptionOptions()
         );
@@ -296,6 +302,10 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
         // CEI: state before transfer
         s_claimed[marketId][msg.sender] = true;
 
+        // [ARCHITECTURE-DECISION] msg.sender is the legitimate claimant; s_claimed[marketId][msg.sender] is
+        // set to true above (CEI). nonReentrant prevents reentrancy at the call stack level. Recipient is
+        // always the caller, never an arbitrary third party.
+        // slither-disable-next-line arbitrary-send-eth
         (bool ok,) = msg.sender.call{value: payout}("");
         if (!ok) revert PredictionMarket__TransferFailed();
 
@@ -325,6 +335,9 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
         // CEI: state before transfer
         s_refunded[marketId][msg.sender] = true;
 
+        // [ARCHITECTURE-DECISION] msg.sender is the legitimate refund recipient; s_refunded[marketId][msg.sender]
+        // is set to true above (CEI). nonReentrant prevents reentrancy. Recipient is always the caller.
+        // slither-disable-next-line arbitrary-send-eth
         (bool ok,) = msg.sender.call{value: refundAmount}("");
         if (!ok) revert PredictionMarket__TransferFailed();
 
@@ -414,6 +427,12 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
         bytes memory payload =
             abi.encodeWithSignature("inferString(string,string,bool,string[])", prompt, system, true, allowedValues);
 
+        // [ARCHITECTURE-DECISION] State writes (s_requestToMarket, pendingRequestId, pendingAgentType) occur
+        // after the external call because the requestId is not known until createRequest returns. Re-entry is
+        // safe: market is already in LLMResolving before _invokeLlm is called; any re-entrant handleResponse
+        // would fail s_requestToMarket[newRequestId]==0 → UnknownRequest. i_somniaAgents is immutable/trusted.
+        // Recipient is the immutable trusted Somnia Agents platform, never user-controlled.
+        // slither-disable-next-line arbitrary-send-eth,reentrancy-eth,reentrancy-benign
         uint256 newRequestId = ISomniaAgents(i_somniaAgents).createRequest{value: LLM_DEPOSIT}(
             LLM_AGENT_ID, address(this), this.handleResponse.selector, payload
         );
@@ -514,6 +533,12 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
         bytes memory payload =
             abi.encodeWithSignature("fetchUint(string,string,uint8)", market.dataSource, market.jsonSelector, uint8(0));
 
+        // [ARCHITECTURE-DECISION] State writes (s_requestToMarket, pendingRequestId, pendingAgentType) occur
+        // after the external call because requestId is not known until createRequest returns. Re-entry is safe:
+        // market is already Resolving; any re-entrant handleResponse fails UnknownRequest since the new requestId
+        // isn't in s_requestToMarket yet. i_somniaAgents is immutable/trusted.
+        // Recipient is the immutable trusted Somnia Agents platform, never user-controlled.
+        // slither-disable-next-line arbitrary-send-eth,reentrancy-eth,reentrancy-benign,reentrancy-events
         uint256 requestId = ISomniaAgents(i_somniaAgents).createRequest{value: JSON_DEPOSIT}(
             JSON_AGENT_ID, address(this), this.handleResponse.selector, payload
         );

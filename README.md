@@ -32,6 +32,25 @@ pnpm dev
 
 Requires [pnpm](https://pnpm.io/installation). Open [http://localhost:3000](http://localhost:3000).
 
+## Contracts — Testing & Coverage
+
+```bash
+# Unit + fuzz tests
+cd contracts && forge test
+
+# Invariant tests only
+cd contracts && forge test --match-contract PredictionMarketInvariantsTest -v
+
+# All tests including invariants
+cd contracts && forge test -v
+
+# Coverage report (target: ≥90% line + branch for all src/ files)
+cd contracts && forge coverage --report summary
+
+# Static analysis (target: zero HIGH/MEDIUM findings)
+cd contracts && slither src/
+```
+
 ## Key Management
 
 Private keys must **never** appear in `.env`, `.env.example`, or any committed file.
