@@ -79,7 +79,7 @@ NEXT_PUBLIC_CONTRACT_ADDRESS=<deployed_address>
 Re-run after any contract interface change (AR-16 discipline — commit ABI and contract source together):
 
 ```bash
-cd contracts && forge inspect PredictionMarket abi > ../frontend/lib/abi.json
+cd contracts && forge inspect src/PredictionMarket.sol:PredictionMarket abi --json > ../frontend/lib/abi.json
 ```
 
 ### Frontend → Vercel

@@ -1,2 +1,737 @@
-import abiJson from './abi.json';
-export const predictionMarketAbi = abiJson as const;
+export const predictionMarketAbi = [
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "_somniaAgents",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "claim",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "createMarket",
+    "inputs": [
+      {
+        "name": "question",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "dataSource",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "jsonSelector",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "threshold",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "resolutionTime",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "ambiguityBandBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "getBet",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "bettor",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getMarket",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct PredictionMarket.Market",
+        "components": [
+          {
+            "name": "id",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "creator",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "question",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "dataSource",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "jsonSelector",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "threshold",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "ambiguityBandBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "resolutionTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "yesPool",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "noPool",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum MarketStatus"
+          },
+          {
+            "name": "verdict",
+            "type": "uint8",
+            "internalType": "enum Verdict"
+          },
+          {
+            "name": "subscriptionId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pendingRequestId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pendingAgentType",
+            "type": "uint8",
+            "internalType": "enum AgentRequestType"
+          },
+          {
+            "name": "resolvedAt",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getMarketCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "handleResponse",
+    "inputs": [
+      {
+        "name": "requestId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "responses",
+        "type": "tuple[]",
+        "internalType": "struct ISomniaAgents.Response[]",
+        "components": [
+          {
+            "name": "result",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "status",
+        "type": "uint8",
+        "internalType": "enum ISomniaAgents.ResponseStatus"
+      },
+      {
+        "name": "details",
+        "type": "tuple",
+        "internalType": "struct ISomniaAgents.Request",
+        "components": [
+          {
+            "name": "payload",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "onEvent",
+    "inputs": [
+      {
+        "name": "emitter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "eventTopics",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
+      },
+      {
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "placeBet",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "refund",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "supportsInterface",
+    "inputs": [
+      {
+        "name": "interfaceId",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "event",
+    "name": "BetPlaced",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "bettor",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "uint8"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Claimed",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "bettor",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LowReactivityBalance",
+    "inputs": [
+      {
+        "name": "currentBalance",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MarketCreated",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "creator",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "question",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "resolutionTime",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MarketResolved",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "verdict",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum Verdict"
+      },
+      {
+        "name": "winningPool",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "losingPool",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "requestId",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Refunded",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "bettor",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ResolutionDeferred",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ResolutionFailed",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "status",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ResolutionInitiated",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "requestId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ResolutionScheduled",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "subscriptionId",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "resolutionTime",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "EmptyFilter",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "GasLimitExceeded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "GasLimitZero",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HandlerZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InsufficientBalance",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidMaxFeePerGas",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyReactivityPrecompile",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__AlreadyClaimed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__AlreadyRefunded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__BetBelowMinimum",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__EmptyDataSource",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__EmptyQuestion",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__InsufficientReactivityFunds",
+    "inputs": [
+      {
+        "name": "available",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "required",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__InvalidAmbiguityBand",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__InvalidSide",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__InvalidStateTransition",
+    "inputs": [
+      {
+        "name": "actual",
+        "type": "uint8",
+        "internalType": "enum MarketStatus"
+      },
+      {
+        "name": "expected",
+        "type": "uint8",
+        "internalType": "enum MarketStatus"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__InvalidThreshold",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__MarketClosed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__MarketDoesNotExist",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__MarketNotOpen",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__NotRefundable",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__NotWinningPosition",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__OnlySomniaAgents",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__ResolutionTimeInPast",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__TransferFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__UnknownRequest",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PredictionMarket__ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ReentrancyGuardReentrantCall",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TimestampInPast",
+    "inputs": []
+  }
+] as const;
