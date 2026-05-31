@@ -88,18 +88,7 @@ cd contracts && forge inspect src/PredictionMarket.sol:PredictionMarket abi --js
 cd frontend
 vercel link    # one-time
 vercel --prod  # subsequent deploys (or auto on git push to main)
-```
-
-## Key Management
-
-Private keys must **never** appear in `.env`, `.env.example`, or any committed file.
-Foundry's encrypted keystore is the only accepted mechanism for signing transactions:
-
-```bash
-cast wallet import somi-deployer --interactive
-```
-
-You will be prompted for your Somnia testnet private key and a password. 
+``` 
 
 ## On the Somnia Prototype
 
