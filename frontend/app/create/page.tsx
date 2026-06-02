@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { TemplateSelectorCards } from '@/components/somi/TemplateSelectorCards';
+import { TestSelectorPreview } from '@/components/somi/TestSelectorPreview';
 import { MarketTemplate } from '@/lib/templates';
 
 const createMarketSchema = z.object({
@@ -126,6 +127,8 @@ export default function CreatePage() {
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<MarketTemplate['id'] | null>(null);
   const watchedBandBps = form.watch('ambiguityBandBps');
+  const watchedDataSource = form.watch('dataSource');
+  const watchedJsonSelector = form.watch('jsonSelector');
 
   const [relativePreset, setRelativePreset] = useState<RelativePreset>('1d');
   const [customDatetime, setCustomDatetime] = useState('');
@@ -220,13 +223,21 @@ export default function CreatePage() {
                 <FormItem>
                   <FormLabel>JSONPath Selector</FormLabel>
                   <FormControl>
-                    <Input placeholder="bitcoin.usd" className="font-mono" {...field} />
+                    <Input
+                      placeholder="bitcoin.usd"
+                      className="font-mono"
+                      aria-describedby="test-selector-result"
+                      {...field}
+                    />
                   </FormControl>
                   <FormDescription>
                     Dot-notation path to the numeric value (e.g. bitcoin.usd).
                   </FormDescription>
                   <FormMessage />
-                  {/* Test Selector — Story 3.4 */}
+                  <TestSelectorPreview
+                    dataSource={watchedDataSource}
+                    jsonSelector={watchedJsonSelector}
+                  />
                 </FormItem>
               )}
             />
