@@ -6,6 +6,8 @@ export const CONTRACT_ADDRESS: `0x${string}` | undefined =
 
 export const RECEIPT_BASE_URL = 'https://agents.testnet.somnia.network/receipts/' as const;
 
+export const SHANNON_EXPLORER_BASE_URL = 'https://shannon-explorer.somnia.network' as const;
+
 export const MIN_BET_STT = 0.01 as const;
 
 const rawFeaturedMarketId = process.env.NEXT_PUBLIC_FEATURED_MARKET_ID;
