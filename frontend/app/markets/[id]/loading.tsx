@@ -1,3 +1,4 @@
+import { VerdictBanner } from '@/components/somi/VerdictBanner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusPill } from '@/components/somi/StatusPill';
 import { PoolBar } from '@/components/somi/PoolBar';
@@ -7,6 +8,7 @@ export default function MarketDetailLoading() {
   return (
     <div className="max-w-4xl mx-auto px-4 lg:px-8 py-8 lg:py-12">
       <div className="flex flex-col gap-6">
+        <VerdictBanner.Skeleton />
         <StatusPill.Skeleton />
         <div className="space-y-2">
           <Skeleton className="h-8 w-full" />
