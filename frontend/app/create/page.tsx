@@ -18,6 +18,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { TemplateSelectorCards } from '@/components/somi/TemplateSelectorCards';
 import { TestSelectorPreview } from '@/components/somi/TestSelectorPreview';
+import { Slider } from '@/components/ui/slider';
+import { AmbiguityBandViz } from '@/components/somi/AmbiguityBandViz';
 import { MarketTemplate } from '@/lib/templates';
 
 const createMarketSchema = z.object({
@@ -129,6 +131,7 @@ export default function CreatePage() {
   const watchedBandBps = form.watch('ambiguityBandBps');
   const watchedDataSource = form.watch('dataSource');
   const watchedJsonSelector = form.watch('jsonSelector');
+  const watchedThreshold = form.watch('threshold');
 
   const [relativePreset, setRelativePreset] = useState<RelativePreset>('1d');
   const [customDatetime, setCustomDatetime] = useState('');
@@ -264,30 +267,51 @@ export default function CreatePage() {
               )}
             />
 
-            {/* Ambiguity Band — Story 3.5 will replace this Input with Slider + readout */}
             <FormField
               control={form.control}
               name="ambiguityBandBps"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Ambiguity Band (bps)</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={1000}
-                      className="font-mono tabular-nums"
-                      {...field}
-                      onChange={(e) => field.onChange(e.target.valueAsNumber)}
+              render={({ field }) => {
+                let thresholdBigInt = 0n;
+                try { thresholdBigInt = BigInt(watchedThreshold || '0'); } catch { /* invalid */ }
+                const bandBigInt = BigInt(field.value);
+                const bandHalf = thresholdBigInt > 0n ? (thresholdBigInt * bandBigInt) / 10_000n : 0n;
+                const low = thresholdBigInt - bandHalf;
+                const high = thresholdBigInt + bandHalf;
+                const pct = (field.value / 100).toFixed(2);
+                const readout =
+                  thresholdBigInt > 0n
+                    ? `±${pct}% (${Number(low).toLocaleString()}–${Number(high).toLocaleString()})`
+                    : `±${pct}% (–)`;
+
+                return (
+                  <FormItem>
+                    <FormLabel>Ambiguity Band</FormLabel>
+                    <FormControl>
+                      <div className="flex flex-col gap-2">
+                        <Slider
+                          min={1}
+                          max={1000}
+                          step={10}
+                          value={[field.value]}
+                          onValueChange={([v]) => field.onChange(v)}
+                          aria-label="Ambiguity Band"
+                        />
+                        <p className="font-mono text-sm tabular-nums text-muted-foreground">{readout}</p>
+                      </div>
+                    </FormControl>
+                    <AmbiguityBandViz
+                      variant="md"
+                      threshold={thresholdBigInt}
+                      bandBps={bandBigInt}
                     />
-                  </FormControl>
-                  <FormDescription>
-                    1–1000 basis points (0.01%–10%). Values within this band trigger the AI
-                    tiebreaker.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
+                    <FormDescription>
+                      1–1000 basis points (0.01%–10%). Values within this band trigger the AI
+                      tiebreaker.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                );
+              }}
             />
 
             <FormField
