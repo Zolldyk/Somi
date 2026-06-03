@@ -19,13 +19,16 @@ import {SomniaExtensions} from "@somnia-chain/reactivity-contracts/contracts/int
 import {ISomniaReactivityPrecompile} from
     "@somnia-chain/reactivity-contracts/contracts/interfaces/ISomniaReactivityPrecompile.sol";
 import {MockSomniaReactivityPrecompile} from "./mocks/MockSomniaReactivityPrecompile.sol";
+import {MockSomniaStreams} from "./mocks/MockSomniaStreams.sol"; // [Epic 5]
 
 contract PredictionMarketTest is Test {
     PredictionMarket private s_pm;
     MockSomniaAgents private s_mockAgents;
     bool private s_usingMockPrecompile;
+    MockSomniaStreams private s_mockStreams; // [Epic 5]
     address private constant MOCK_AGENTS = address(0xA9E5);
     address private constant PRECOMPILE = address(0x0100);
+    address private constant STREAMS_PROXY = 0x6AB397FF662e42312c003175DCD76EfF69D048Fc; // [Epic 5]
 
     uint256 private constant RESERVE_FLOOR = 32 ether;
     uint256 private constant LOW_BALANCE_THRESHOLD = 35 ether;
@@ -54,6 +57,9 @@ contract PredictionMarketTest is Test {
         s_pm = new PredictionMarket{value: 50 ether}(address(s_mockAgents));
         // Step 3: wire the mock back to PM
         s_mockAgents.setTarget(address(s_pm));
+        // Step 4: etch Streams mock at the precompile address (Epic 5) — storage not copied, shouldRevert defaults false
+        s_mockStreams = new MockSomniaStreams();
+        vm.etch(STREAMS_PROXY, address(s_mockStreams).code);
     }
 
     receive() external payable {}
@@ -1137,5 +1143,60 @@ contract PredictionMarketTest is Test {
 
         // Refund is full-stake recovery; no integer division — exact equality
         assertEq(totalRefunded, totalStaked, "total refunded must equal total staked");
+    }
+
+    // ============ _publishOutcome Tests (Epic 5) ============
+
+    function test_PublishOutcome_SuccessPath_MarketResolvedEmitted() public {
+        MockSomniaStreams(STREAMS_PROXY).setShouldRevert(false);
+
+        uint256 requestId = 200;
+        uint256 marketId = _seedResolvingMarket(requestId);
+
+        uint256 fetchedValue = 120_000; // above bandHigh → YES
+        ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
+        responses[0] = ISomniaAgents.Response({result: abi.encode(fetchedValue)});
+        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+
+        vm.recordLogs();
+        s_mockAgents.callHandleResponse(requestId, responses, ISomniaAgents.ResponseStatus.Success, req);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 resolvedTopic = keccak256("MarketResolved(uint256,uint8,uint256,uint256,uint256)");
+        bytes32 failTopic = keccak256("StreamsPublishFailed(uint256,string)");
+        bool foundResolved = false;
+        bool foundFailed = false;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == resolvedTopic) foundResolved = true;
+            if (logs[i].topics[0] == failTopic) foundFailed = true;
+        }
+        assertTrue(foundResolved, "MarketResolved must be emitted");
+        assertFalse(foundFailed, "StreamsPublishFailed must not be emitted when Streams succeeds");
+
+        PredictionMarket.Market memory m = s_pm.getMarket(marketId);
+        assertEq(uint8(m.status), uint8(MarketStatus.Resolved));
+    }
+
+    function test_PublishOutcome_FailurePath_StreamsPublishFailedEmitted() public {
+        MockSomniaStreams(STREAMS_PROXY).setShouldRevert(true);
+
+        uint256 requestId = 201;
+        uint256 marketId = _seedResolvingMarket(requestId);
+
+        uint256 fetchedValue = 120_000; // above bandHigh → YES
+        ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
+        responses[0] = ISomniaAgents.Response({result: abi.encode(fetchedValue)});
+        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+
+        vm.expectEmit(true, false, false, false, address(s_pm));
+        emit PredictionMarket.MarketResolved(marketId, Verdict.YES, 0, 0, requestId);
+
+        vm.expectEmit(true, false, false, true, address(s_pm));
+        emit PredictionMarket.StreamsPublishFailed(marketId, "streams-error");
+
+        s_mockAgents.callHandleResponse(requestId, responses, ISomniaAgents.ResponseStatus.Success, req);
+
+        PredictionMarket.Market memory m = s_pm.getMarket(marketId);
+        assertEq(uint8(m.status), uint8(MarketStatus.Resolved), "settlement must complete despite Streams failure");
     }
 }

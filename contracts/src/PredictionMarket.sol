@@ -128,6 +128,7 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     );
     event Claimed(uint256 indexed marketId, address indexed bettor, uint256 amount);
     event Refunded(uint256 indexed marketId, address indexed bettor, uint256 amount);
+    event StreamsPublishFailed(uint256 indexed marketId, string reason); // [Epic 5]
     event LowReactivityBalance(uint256 currentBalance);
 
     // ============ Constructor ============
@@ -507,6 +508,29 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
         }
 
         emit MarketResolved(marketId, verdict, winningPool, losingPool, requestId);
+        _publishOutcome(marketId, requestId); // [Epic 5]
+    }
+
+    /// @notice Publish settled market outcome to Somnia Data Streams (FR-12, best-effort).
+    /// @dev Wrapped in try/catch — Streams failure never reverts settlement. Called as the final
+    ///      action of _settleMarket, after MarketResolved is emitted, so settlement state is durable
+    ///      regardless of Streams success. INVALID markets (via _handleLlmResponse) do not call this.
+    /// @param marketId  The settled market.
+    /// @param requestId The agent request ID, included in the Streams payload for cross-referencing.
+    function _publishOutcome(uint256 marketId, uint256 requestId) internal {
+        Market storage market = s_markets[marketId];
+        ISomniaStreams.DataStream[] memory streams = new ISomniaStreams.DataStream[](1);
+        streams[0] = ISomniaStreams.DataStream({
+            id: bytes32(marketId),
+            schemaId: STREAMS_SCHEMA_ID,
+            data: abi.encode(marketId, market.question, uint8(market.verdict), market.resolvedAt, requestId)
+        });
+        try ISomniaStreams(STREAMS_PROXY).esstores(streams) {}
+        catch Error(string memory reason) {
+            emit StreamsPublishFailed(marketId, reason);
+        } catch {
+            emit StreamsPublishFailed(marketId, "");
+        }
     }
 
     /// @notice Autonomous resolution trigger — fires in the same block as `resolutionTime` (NFR-2 same-block guarantee).
