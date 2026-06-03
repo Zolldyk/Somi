@@ -18,6 +18,7 @@ import {
     PredictionMarket__NotRefundable
 } from "./libraries/SettlementLib.sol";
 import {ISomniaAgents} from "./interfaces/ISomniaAgents.sol";
+import {ISomniaStreams} from "./interfaces/ISomniaStreams.sol"; // [Epic 5]
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 // Layout of Contract:
@@ -101,6 +102,8 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     uint256 private constant LLM_AGENT_ID = 12847293847561029384;
     uint256 private constant JSON_AGENT_ID = 13174292974160097713;
     uint256 private constant JSON_DEPOSIT = 0.12 ether;
+    address private constant STREAMS_PROXY = 0x6AB397FF662e42312c003175DCD76EfF69D048Fc; // [Epic 5]
+    bytes32 private constant STREAMS_SCHEMA_ID = bytes32(0); // [Epic 5] placeholder — update after schema registration per README
 
     address private immutable i_somniaAgents;
 

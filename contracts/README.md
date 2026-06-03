@@ -67,3 +67,86 @@ Foundry will prompt for your keystore password at deploy time.
 because a public Foundry-installable GitHub mirror does not yet exist (noted as "coming soon"
 in Somnia docs as of 2026-05). Once a public mirror is available, replace this vendored copy
 with `forge install somnia-chain/reactivity-contracts` and remove the vendored directory.
+
+## Epic 5 — Outcome Publication (STRETCH)
+
+> **Cuttability:** Epic 5 is the first feature to cut per PRD §6.2. To remove it entirely:
+> 1. Delete `contracts/src/interfaces/ISomniaStreams.sol`
+> 2. Remove the one `import {ISomniaStreams}` line from `PredictionMarket.sol`
+> 3. Remove the two `STREAMS_PROXY` and `STREAMS_SCHEMA_ID` constant declarations from `PredictionMarket.sol`
+> No other file changes required.
+
+### Schema Definition
+
+After each market settles, the outcome is published to Somnia Streams so any subscriber can
+react to verdicts on-chain. The schema string is:
+
+```
+'uint256 marketId, string question, uint8 verdict, uint64 resolvedAt, uint256 requestId'
+```
+
+Field notes:
+- `uint8 verdict` — the `Verdict` enum's underlying type (0=Unset, 1=YES, 2=NO, 3=INVALID)
+- `string question` — keep questions short (<200 chars); Somnia Streams docs warn that string
+  fields incur on-chain storage costs proportional to length
+- `uint256 requestId` — links to the Agent Explorer receipt for cross-referencing
+- **Do not reorder fields** — the schema ID is a hash of this exact string; reordering breaks
+  all existing subscribers
+
+### Computing the Schema ID (off-chain)
+
+Install the TypeScript SDK once (one-time setup):
+
+```bash
+npm i @somnia-chain/streams
+```
+
+Then compute the schema ID locally:
+
+```ts
+import { SomniaSDK } from '@somnia-chain/streams';
+
+const sdk = new SomniaSDK({ rpc: 'https://dream-rpc.somnia.network' });
+const schema = 'uint256 marketId, string question, uint8 verdict, uint64 resolvedAt, uint256 requestId';
+const schemaId = await sdk.streams.computeSchemaId(schema);
+console.log('STREAMS_SCHEMA_ID =', schemaId); // bytes32 hex string
+```
+
+### Registering the Schema on Somnia Testnet (one-time)
+
+> **April 2026 API note:** The `registerDataSchemas` shape changed in April 2026. Earlier tutorials
+> use `{ id, schema }` — the current API requires `{ schemaName, schema, parentSchemaId }`.
+
+```ts
+import { SomniaSDK } from '@somnia-chain/streams';
+import { ethers } from 'ethers';
+
+const provider = new ethers.JsonRpcProvider('https://dream-rpc.somnia.network');
+const signer = new ethers.Wallet(process.env.DEPLOYER_PRIVATE_KEY!, provider);
+const sdk = new SomniaSDK({ signer });
+
+const zeroBytes32 = '0x' + '00'.repeat(32);
+const schema = 'uint256 marketId, string question, uint8 verdict, uint64 resolvedAt, uint256 requestId';
+
+await sdk.streams.registerDataSchemas([{
+  schemaName: 'somi-market-outcome',
+  schema,
+  parentSchemaId: zeroBytes32,
+}]);
+
+console.log('Schema registered. Now compute its ID and update STREAMS_SCHEMA_ID.');
+```
+
+### Updating `STREAMS_SCHEMA_ID` Before Story 5.2 Ships
+
+After registration, take the `bytes32` value from `computeSchemaId` and update
+`PredictionMarket.sol`:
+
+```solidity
+bytes32 private constant STREAMS_SCHEMA_ID = 0xYOUR_COMPUTED_ID_HERE; // [Epic 5]
+```
+
+Recompile with `forge build` and redeploy before enabling Story 5.2's `_publishOutcome` logic.
+Deploying with the `bytes32(0)` placeholder means Story 5.2's `esstores()` call will fail
+(submitting a record with schemaId `0x0000...`). The `try/catch` in Story 5.2 ensures this
+never reverts settlement — but outcome records will not appear in subscribers.
