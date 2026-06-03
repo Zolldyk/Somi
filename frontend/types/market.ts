@@ -25,6 +25,14 @@ export interface Market {
   resolvedAt: bigint;
 }
 
+export interface UserPosition {
+  market: Market;
+  yesStake: bigint;
+  noStake: bigint;
+  claimed: boolean;
+  refunded: boolean;
+}
+
 export interface RawMarket {
   id: bigint;
   creator: `0x${string}`;

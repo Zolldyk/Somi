@@ -12,6 +12,7 @@ import {
   type RawMarket,
 } from '@/types/market';
 import { useInvalidateOnBlock } from '@/hooks/internal/useInvalidateOnBlock';
+import { classifySinglePosition } from '@/lib/myBetsSort';
 import { cn } from '@/lib/utils';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const;
@@ -86,15 +87,10 @@ function useActionablePositions(address: `0x${string}` | undefined) {
     const yesStake = (betsData[slotIdx * 2]?.result as unknown as bigint | undefined) ?? 0n;
     const noStake = (betsData[slotIdx * 2 + 1]?.result as unknown as bigint | undefined) ?? 0n;
 
-    if (market.status === 'Resolved') {
-      const winningSide = market.verdict === 'YES' ? 0 : market.verdict === 'NO' ? 1 : -1;
-      if (winningSide === 0 && yesStake > 0n) claimable++;
-      else if (winningSide === 1 && noStake > 0n) claimable++;
-    } else if (market.status === 'Refunded') {
-      if (yesStake > 0n || noStake > 0n) refundableInvalid++;
-    } else if (market.status === 'Disputed') {
-      if (yesStake > 0n || noStake > 0n) refundableDisputed++;
-    }
+    const bucket = classifySinglePosition(market, yesStake, noStake, false, false);
+    if (bucket === 'claimable') claimable++;
+    else if (bucket === 'refundable-invalid') refundableInvalid++;
+    else if (bucket === 'refundable-disputed') refundableDisputed++;
   });
 
   const topBucket: Bucket | null =
