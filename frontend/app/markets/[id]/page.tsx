@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useState, useEffect } from 'react';
+import { use, useEffect } from 'react';
 import { notFound } from 'next/navigation';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { formatUnits } from 'viem';
@@ -36,14 +36,14 @@ function isUserRejection(error: unknown): boolean {
 export default function MarketDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
 
-  let marketId: bigint;
+  let parsedMarketId: bigint | null;
   try {
-    marketId = BigInt(id);
+    parsedMarketId = BigInt(id);
   } catch {
-    notFound();
-    return null;
+    parsedMarketId = null;
   }
-  if (marketId <= 0n) notFound();
+  const isInvalidMarketId = parsedMarketId === null || parsedMarketId <= 0n;
+  const marketId: bigint = isInvalidMarketId ? 0n : parsedMarketId!;
 
   const { market, isPending, isError } = useMarket(marketId);
   const { yesPool: chainYesPool, noPool: chainNoPool } = useMarketPools(marketId);
@@ -53,31 +53,27 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
 
   const { writeContract: writeClaimTx, isPending: isClaimSigning, data: claimTxHash, error: claimWriteError } = useWriteContract();
   const { isLoading: isClaimConfirming, isSuccess: isClaimConfirmed } = useWaitForTransactionReceipt({ hash: claimTxHash });
-  const [claimError, setClaimError] = useState<string | null>(null);
 
   const { writeContract: writeRefundTx, isPending: isRefundSigning, data: refundTxHash, error: refundWriteError } = useWriteContract();
   const { isLoading: isRefundConfirming, isSuccess: isRefundConfirmed } = useWaitForTransactionReceipt({ hash: refundTxHash });
-  const [refundError, setRefundError] = useState<string | null>(null);
-
-  useEffect(() => { if (isClaimConfirmed) setClaimError(null); }, [isClaimConfirmed]);
-  useEffect(() => { if (isRefundConfirmed) setRefundError(null); }, [isRefundConfirmed]);
+  const claimError = isClaimConfirmed || !claimWriteError ? null : translateContractError(claimWriteError);
+  const refundError = isRefundConfirmed || !refundWriteError ? null : translateContractError(refundWriteError);
 
   useEffect(() => {
     if (!claimWriteError) return;
-    const msg = translateContractError(claimWriteError);
-    if (msg) { setClaimError(msg); }
-    else if (isUserRejection(claimWriteError)) { toast('Claim not processed.'); }
+    if (translateContractError(claimWriteError)) return;
+    if (isUserRejection(claimWriteError)) { toast('Claim not processed.'); }
     else { toast('Claim failed. Please try again.'); }
   }, [claimWriteError]);
 
   useEffect(() => {
     if (!refundWriteError) return;
-    const msg = translateContractError(refundWriteError);
-    if (msg) { setRefundError(msg); }
-    else if (isUserRejection(refundWriteError)) { toast('Refund not processed.'); }
+    if (translateContractError(refundWriteError)) return;
+    if (isUserRejection(refundWriteError)) { toast('Refund not processed.'); }
     else { toast('Refund failed. Please try again.'); }
   }, [refundWriteError]);
 
+  if (isInvalidMarketId) notFound();
   if (!isPending && isError) notFound();
   if (!isPending && market && market.id === 0n) notFound();
 
@@ -112,7 +108,6 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
 
   function handleClaim() {
     if (!CONTRACT_ADDRESS || !market) return;
-    setClaimError(null);
     writeClaimTx({
       address: CONTRACT_ADDRESS,
       abi: predictionMarketAbi,
@@ -123,7 +118,6 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
 
   function handleRefund() {
     if (!CONTRACT_ADDRESS || !market) return;
-    setRefundError(null);
     writeRefundTx({
       address: CONTRACT_ADDRESS,
       abi: predictionMarketAbi,

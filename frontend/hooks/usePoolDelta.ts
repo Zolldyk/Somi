@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 
 interface PoolDelta {
   yesPool: bigint;
@@ -10,22 +10,28 @@ interface PoolDelta {
 const ZERO_DELTA: PoolDelta = { yesPool: 0n, noPool: 0n };
 
 export function usePoolDelta(marketId: bigint) {
-  const [delta, setDelta] = useState<PoolDelta>(ZERO_DELTA);
+  const [state, setState] = useState<{ marketId: bigint; delta: PoolDelta }>({
+    marketId,
+    delta: ZERO_DELTA,
+  });
 
-  useEffect(() => {
-    setDelta(ZERO_DELTA);
-  }, [marketId]);
+  const delta = state.marketId === marketId ? state.delta : ZERO_DELTA;
 
   const addOptimistic = useCallback((side: 0 | 1, amount: bigint) => {
-    setDelta(prev =>
-      side === 0
-        ? { ...prev, yesPool: prev.yesPool + amount }
-        : { ...prev, noPool: prev.noPool + amount }
-    );
-  }, []);
+    setState((prev) => {
+      const prevDelta = prev.marketId === marketId ? prev.delta : ZERO_DELTA;
+      return {
+        marketId,
+        delta:
+          side === 0
+            ? { ...prevDelta, yesPool: prevDelta.yesPool + amount }
+            : { ...prevDelta, noPool: prevDelta.noPool + amount },
+      };
+    });
+  }, [marketId]);
 
-  const rollback = useCallback(() => setDelta(ZERO_DELTA), []);
-  const clear = useCallback(() => setDelta(ZERO_DELTA), []);
+  const rollback = useCallback(() => setState({ marketId, delta: ZERO_DELTA }), [marketId]);
+  const clear = useCallback(() => setState({ marketId, delta: ZERO_DELTA }), [marketId]);
 
   return { delta, addOptimistic, rollback, clear };
 }

@@ -186,7 +186,7 @@ function ReceiptSummaryCardBase({ market, className }: ReceiptSummaryCardProps) 
             aria-label="Open receipt in new tab"
             className="inline-block rounded-sm border border-accent-llm px-4 py-2 font-mono text-base text-accent-llm transition-colors hover:bg-accent-llm/10"
           >
-            View the AI's reasoning →
+            View the AI&apos;s reasoning →
           </a>
         </div>
       )}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod/v3';
 import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
@@ -129,6 +129,7 @@ function isUserRejection(error: unknown): boolean {
 
 export default function CreatePage() {
   const router = useRouter();
+  const [defaultResolutionTime] = useState(() => Math.floor(Date.now() / 1000) + 86400);
   const { writeContract, isPending: isSigning, data: txHash } = useWriteContract();
   const {
     isLoading: isConfirming,
@@ -145,19 +146,19 @@ export default function CreatePage() {
       dataSource: '',
       jsonSelector: '',
       threshold: '',
-      resolutionTime: Math.floor(Date.now() / 1000) + 86400,
+      resolutionTime: defaultResolutionTime,
       ambiguityBandBps: 100,
     },
     mode: 'onBlur',
   });
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<MarketTemplate['id'] | null>(null);
-  const watchedBandBps = form.watch('ambiguityBandBps');
-  const watchedDataSource = form.watch('dataSource');
-  const watchedJsonSelector = form.watch('jsonSelector');
-  const watchedThreshold = form.watch('threshold');
-  const watchedQuestion = form.watch('question');
-  const watchedResolutionTime = form.watch('resolutionTime');
+  const watchedBandBps = useWatch({ control: form.control, name: 'ambiguityBandBps' });
+  const watchedDataSource = useWatch({ control: form.control, name: 'dataSource' });
+  const watchedJsonSelector = useWatch({ control: form.control, name: 'jsonSelector' });
+  const watchedThreshold = useWatch({ control: form.control, name: 'threshold' });
+  const watchedQuestion = useWatch({ control: form.control, name: 'question' });
+  const watchedResolutionTime = useWatch({ control: form.control, name: 'resolutionTime' });
 
   const [relativePreset, setRelativePreset] = useState<RelativePreset>('1d');
   const [customDatetime, setCustomDatetime] = useState('');
@@ -238,7 +239,7 @@ export default function CreatePage() {
 
   useEffect(() => {
     if (isReceiptError) toast('Market creation failed. Please try again.');
-  }, [isReceiptError]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isReceiptError]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 lg:px-12 py-8 lg:py-12">

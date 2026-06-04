@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 
-function computeLabel(resolutionTime: bigint): string | null {
-  const diffSec = Number(resolutionTime) - Math.floor(Date.now() / 1000);
+function computeLabel(resolutionTime: bigint, nowMs: number): string | null {
+  const diffSec = Number(resolutionTime) - Math.floor(nowMs / 1000);
   if (diffSec < 0) return null;
   if (diffSec === 0) return 'now';
   const totalMin = Math.floor(diffSec / 60);
@@ -16,15 +16,16 @@ function computeLabel(resolutionTime: bigint): string | null {
 }
 
 export function CountdownTimer({ resolutionTime }: { resolutionTime: bigint }) {
-  const [label, setLabel] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    setLabel(computeLabel(resolutionTime));
     const interval = setInterval(() => {
-      setLabel(computeLabel(resolutionTime));
+      setNowMs(Date.now());
     }, 60_000);
     return () => clearInterval(interval);
-  }, [resolutionTime]);
+  }, []);
+
+  const label = computeLabel(resolutionTime, nowMs);
 
   if (label === null) return null;
 

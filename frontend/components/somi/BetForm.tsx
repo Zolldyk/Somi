@@ -58,8 +58,10 @@ function BetFormBase({ market, poolDelta, className }: BetFormProps) {
   const [amountStr, setAmountStr] = useState('');
   const [inlineError, setInlineError] = useState<string | null>(null);
 
-  const amountNum = parseFloat(amountStr || '0');
-  const isValidAmount = !isNaN(amountNum) && amountNum >= MIN_BET_STT;
+  const trimmedAmount = amountStr.trim();
+  const isStrictDecimal = /^\d*\.?\d+$/.test(trimmedAmount);
+  const amountNum = isStrictDecimal ? parseFloat(trimmedAmount) : NaN;
+  const isValidAmount = isStrictDecimal && !isNaN(amountNum) && amountNum >= MIN_BET_STT;
 
   const { writeContract, isPending: isSigning, data: txHash } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed, isError: isReceiptError } =
@@ -67,10 +69,12 @@ function BetFormBase({ market, poolDelta, className }: BetFormProps) {
 
   useEffect(() => {
     if (isConfirmed) {
-      poolDelta.clear();
-      setSelectedSide(null);
-      setAmountStr('');
-      setInlineError(null);
+      queueMicrotask(() => {
+        poolDelta.clear();
+        setSelectedSide(null);
+        setAmountStr('');
+        setInlineError(null);
+      });
     }
   }, [isConfirmed]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -90,7 +94,13 @@ function BetFormBase({ market, poolDelta, className }: BetFormProps) {
   function handleSubmit() {
     if (selectedSide === null || !isValidAmount || !CONTRACT_ADDRESS) return;
     setInlineError(null);
-    const amountWei = parseEther(amountStr);
+    let amountWei: bigint;
+    try {
+      amountWei = parseEther(trimmedAmount);
+    } catch {
+      setInlineError('Enter a valid amount.');
+      return;
+    }
     writeContract(
       {
         address: CONTRACT_ADDRESS,

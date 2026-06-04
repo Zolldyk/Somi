@@ -85,7 +85,8 @@ export function useMyPositions(address: `0x${string}` | undefined) {
   });
 
   const isPending =
-    countResult.isPending || marketsResult.isPending || betsResult.isPending;
+    countResult.isPending ||
+    (ids.length > 0 && (marketsResult.isPending || betsResult.isPending));
   const isFetching =
     countResult.isFetching || marketsResult.isFetching || betsResult.isFetching;
   const error = countResult.error ?? marketsResult.error ?? betsResult.error;

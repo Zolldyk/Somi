@@ -27,7 +27,10 @@ const INITIAL_STATE: PipelineState = {
 };
 
 function usePipelineEvents(marketId: bigint, enabled: boolean): PipelineState {
-  const [state, setState] = useState<PipelineState>(INITIAL_STATE);
+  const [state, setState] = useState<{ marketId: bigint; data: PipelineState }>({
+    marketId,
+    data: INITIAL_STATE,
+  });
   const publicClient = usePublicClient();
   const prevEnabledRef = useRef(enabled);
 
@@ -43,17 +46,13 @@ function usePipelineEvents(marketId: bigint, enabled: boolean): PipelineState {
       });
   }
 
-  useEffect(() => {
-    setState(INITIAL_STATE);
-  }, [marketId]);
-
   // Reset when the same market re-enters Resolving after a prior resolution cycle
   useEffect(() => {
     if (enabled && !prevEnabledRef.current) {
-      setState(INITIAL_STATE);
+      queueMicrotask(() => setState({ marketId, data: INITIAL_STATE }));
     }
     prevEnabledRef.current = enabled;
-  }, [enabled]);
+  }, [enabled, marketId]);
 
   useWatchContractEvent({
     address: CONTRACT_ADDRESS,
@@ -70,9 +69,22 @@ function usePipelineEvents(marketId: bigint, enabled: boolean): PipelineState {
       };
       if (args.marketId !== marketId) return;
       if (!logBlock) return; // pending tx; skip rather than fetch genesis block
-      setState((prev) => ({ ...prev, triggerBlock: logBlock, requestId: args.requestId }));
+      setState((prev) => ({
+        marketId,
+        data: {
+          ...(prev.marketId === marketId ? prev.data : INITIAL_STATE),
+          triggerBlock: logBlock,
+          requestId: args.requestId,
+        },
+      }));
       fetchAndSetTimestamp(logBlock, (ts) => {
-        setState((prev) => ({ ...prev, triggerTimestamp: ts }));
+        setState((prev) => ({
+          marketId,
+          data: {
+            ...(prev.marketId === marketId ? prev.data : INITIAL_STATE),
+            triggerTimestamp: ts,
+          },
+        }));
       });
     },
   });
@@ -92,9 +104,21 @@ function usePipelineEvents(marketId: bigint, enabled: boolean): PipelineState {
       };
       if (args.marketId !== marketId) return;
       if (!logBlock) return;
-      setState((prev) => ({ ...prev, step3State: 'done' }));
+      setState((prev) => ({
+        marketId,
+        data: {
+          ...(prev.marketId === marketId ? prev.data : INITIAL_STATE),
+          step3State: 'done',
+        },
+      }));
       fetchAndSetTimestamp(logBlock, (ts) => {
-        setState((prev) => ({ ...prev, step3Timestamp: ts }));
+        setState((prev) => ({
+          marketId,
+          data: {
+            ...(prev.marketId === marketId ? prev.data : INITIAL_STATE),
+            step3Timestamp: ts,
+          },
+        }));
       });
     },
   });
@@ -114,14 +138,26 @@ function usePipelineEvents(marketId: bigint, enabled: boolean): PipelineState {
       };
       if (args.marketId !== marketId) return;
       if (!logBlock) return;
-      setState((prev) => ({ ...prev, step3State: 'failed' }));
+      setState((prev) => ({
+        marketId,
+        data: {
+          ...(prev.marketId === marketId ? prev.data : INITIAL_STATE),
+          step3State: 'failed',
+        },
+      }));
       fetchAndSetTimestamp(logBlock, (ts) => {
-        setState((prev) => ({ ...prev, step3Timestamp: ts }));
+        setState((prev) => ({
+          marketId,
+          data: {
+            ...(prev.marketId === marketId ? prev.data : INITIAL_STATE),
+            step3Timestamp: ts,
+          },
+        }));
       });
     },
   });
 
-  return state;
+  return state.marketId === marketId ? state.data : INITIAL_STATE;
 }
 
 function fmtElapsed(start: bigint | null, end: bigint | null): string {
@@ -163,16 +199,18 @@ function ResolutionPipelineStripBase({
 
   const pipeline = usePipelineEvents(market.id, isActive);
 
-  // Track whether this market ever reached LLMResolving so step 2 stays visible as done
-  const [wasEverLLMResolving, setWasEverLLMResolving] = useState(false);
+  // Track whether this market ever reached LLMResolving so step 2 stays visible as done.
+  const [llmSeen, setLlmSeen] = useState(false);
 
   useEffect(() => {
-    if (isLLM) setWasEverLLMResolving(true);
-  }, [isLLM]);
-
-  useEffect(() => {
-    setWasEverLLMResolving(false);
+    queueMicrotask(() => setLlmSeen(false));
   }, [market.id]);
+
+  useEffect(() => {
+    if (isLLM) {
+      queueMicrotask(() => setLlmSeen(true));
+    }
+  }, [isLLM]);
 
   // Stay mounted through the terminal event so the parent briefly sees the finished pipeline
   const isTerminal = pipeline.step3State === 'done' || pipeline.step3State === 'failed';
@@ -188,7 +226,7 @@ function ResolutionPipelineStripBase({
   const isCompact = variant === 'compact';
 
   const step1State: StepState = isLLM || isTerminal ? 'done' : 'live';
-  const step2Shown = isLLM || wasEverLLMResolving;
+  const step2Shown = isLLM || llmSeen;
   const step2State: StepState = isLLM ? 'live' : 'done';
   const step3State: StepState = pipeline.step3State;
 

@@ -1,6 +1,5 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { formatUnits } from 'viem';
 import { StatusPill } from './StatusPill';
@@ -33,19 +32,8 @@ export interface CompactPositionCardProps {
 }
 
 export function CompactPositionCard({ pos, bucket }: CompactPositionCardProps) {
-  const [localClaimed, setLocalClaimed] = useState(false);
-  const [localRefunded, setLocalRefunded] = useState(false);
-
   const claimHook = useClaim(pos.market.id);
   const refundHook = useRefund(pos.market.id);
-
-  useEffect(() => {
-    if (claimHook.isConfirmed) setLocalClaimed(true);
-  }, [claimHook.isConfirmed]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (refundHook.isConfirmed) setLocalRefunded(true);
-  }, [refundHook.isConfirmed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const winnerSide: 0 | 1 | undefined =
     pos.market.status === 'Resolved' && pos.market.verdict === 'YES' ? 0 :
@@ -57,7 +45,7 @@ export function CompactPositionCard({ pos, bucket }: CompactPositionCardProps) {
 
   function renderActionArea() {
     if (bucket === 'claimable') {
-      if (localClaimed) {
+      if (claimHook.isConfirmed) {
         return <span className="font-mono text-xs text-muted-foreground">Claimed</span>;
       }
       const claimLabel = claimHook.isPending
@@ -81,7 +69,7 @@ export function CompactPositionCard({ pos, bucket }: CompactPositionCardProps) {
     }
 
     if (bucket === 'refundable-invalid') {
-      if (localRefunded) {
+      if (refundHook.isConfirmed) {
         return <span className="font-mono text-xs text-muted-foreground">Refunded</span>;
       }
       const refundLabel = refundHook.isPending
@@ -105,7 +93,7 @@ export function CompactPositionCard({ pos, bucket }: CompactPositionCardProps) {
     }
 
     if (bucket === 'refundable-disputed') {
-      if (localRefunded) {
+      if (refundHook.isConfirmed) {
         return <span className="font-mono text-xs text-muted-foreground">Refunded</span>;
       }
       const refundLabel = refundHook.isPending
