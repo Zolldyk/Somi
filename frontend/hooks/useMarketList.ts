@@ -59,7 +59,7 @@ export function useMarketList(offset = 0, limit = 20) {
   return {
     markets,
     totalCount,
-    isPending: countResult.isPending || listResult.isPending,
+    isPending: countResult.isPending || (ids.length > 0 && listResult.isPending),
     isFetching: countResult.isFetching || listResult.isFetching,
     isError: countResult.isError || listResult.isError || hasFailure,
     error: countResult.error ?? listResult.error,
