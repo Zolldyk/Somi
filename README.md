@@ -22,16 +22,20 @@ Somi is a binary prediction market where every outcome is resolved autonomously 
 
 **From `git clone` to your first market in ≤10 minutes.**
 
-**1. Clone the repo**
+Each step below runs from the **repo root** (return there at the end of any step that `cd`s elsewhere).
+
+**1. Clone the repo with submodules**
 
 ```bash
-git clone https://github.com/Zolldyk/Somi && cd Somi
+git clone --recurse-submodules https://github.com/Zolldyk/Somi && cd Somi
 ```
 
-**2. Install and build contracts** (~3 min on first run)
+`--recurse-submodules` is required — the repo depends on `forge-std` and `openzeppelin-contracts` as git submodules. If you already cloned without it, run `git submodule update --init --recursive` from the repo root.
+
+**2. Build the contracts** (~3 min on first run)
 
 ```bash
-cd contracts && forge install && forge build
+cd contracts && forge build && cd ..
 ```
 
 **3. Configure the contracts environment**
@@ -48,6 +52,8 @@ SOMNIA_AGENTS_ADDR=0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776
 
 **4. Import your deployer key into Foundry's encrypted keystore**
 
+If you don't have a deployer key yet, generate one with `cast wallet new` and back up the seed phrase. Then fund the public address from the Somnia faucet (see "What You'll Need") before continuing.
+
 ```bash
 cast wallet import somi-deployer --interactive
 ```
@@ -56,8 +62,11 @@ Your private key stays local in Foundry's encrypted keystore and is never writte
 
 **5. Deploy to Somnia Testnet**
 
+`forge` does not auto-load `.env`, so source it explicitly into the shell first.
+
 ```bash
 cd contracts
+set -a; source .env; set +a
 
 forge create \
   --account somi-deployer \
@@ -65,14 +74,17 @@ forge create \
   --broadcast \
   --legacy \
   --gas-limit 30000000 \
-  --value 35ether \
   src/PredictionMarket.sol:PredictionMarket \
   --constructor-args $SOMNIA_AGENTS_ADDR
+
+cd ..
 ```
 
-Required flags: `--legacy` (Somnia testnet has no EIP-1559 support), `--gas-limit 30000000` (default gas limit fails on this contract's complexity), `--value 35ether` (seeds the Reactivity precompile balance).
+Required flags: `--legacy` (Somnia testnet has no EIP-1559 support) and `--gas-limit 30000000` (default gas limit fails on this contract's complexity). **Do not pass `--value` here** — `msg.value` is not credited during contract creation on Somnia testnet, so any ETH attached to `forge create` is lost. Fund the contract in the next sub-step.
 
-> **Somnia testnet note:** `msg.value` during contract creation is not always credited to the contract's balance on Somnia testnet. After deploy, fund the contract separately so `createMarket` can charge the Reactivity precompile:
+Capture the deployed address from the `forge create` output — it appears as `Deployed to: 0x…`. You'll need it for the funding `cast send`, for `NEXT_PUBLIC_CONTRACT_ADDRESS` in step 7, and (optionally) for `NEXT_PUBLIC_FEATURED_MARKET_ID` once your first market is created.
+
+> **Fund the contract** so `createMarket` can charge the Reactivity precompile (≥32 STT floor required):
 >
 > ```bash
 > cast send <DEPLOYED_ADDRESS> \
@@ -85,10 +97,10 @@ Required flags: `--legacy` (Somnia testnet has no EIP-1559 support), `--gas-limi
 **6. Sync the ABI to the frontend**
 
 ```bash
-forge inspect src/PredictionMarket.sol:PredictionMarket abi --json > ../frontend/lib/abi.json
+cd contracts && forge inspect src/PredictionMarket.sol:PredictionMarket abi --json > ../frontend/lib/abi.json && cd ..
 ```
 
-**7. Configure the frontend** (~2 min to create a free WalletConnect account)
+**7. Configure the frontend** (~2 min to create a free WalletConnect account — required, not optional)
 
 ```bash
 cp frontend/.env.example frontend/.env.local
@@ -101,7 +113,9 @@ NEXT_PUBLIC_CONTRACT_ADDRESS=<deployed_address>
 NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=<your_project_id>
 ```
 
-Create a free WalletConnect project at [cloud.walletconnect.com](https://cloud.walletconnect.com) to get your project ID.
+`NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` is **mandatory** — without it the app throws on first render. Create a free WalletConnect project at [cloud.walletconnect.com](https://cloud.walletconnect.com) to get the ID.
+
+`NEXT_PUBLIC_FEATURED_MARKET_ID` is optional. Leave it blank for the first run; once you've created a market, paste its ID here to feature it on the homepage.
 
 **8. Start the frontend**
 
@@ -114,27 +128,36 @@ Open [http://localhost:3000](http://localhost:3000) and create your first market
 ## Project Structure
 
 ```
-contracts/      Foundry smart contracts (Solidity 0.8.30, OpenZeppelin v5)
-frontend/       Next.js 16 frontend (Tailwind v4, shadcn/ui, wagmi v2)
-scripts/        Utility scripts (ABI sync, schema registration)
-_bmad-output/   Project planning artifacts, epics, and story specs
+contracts/   Foundry smart contracts (Solidity 0.8.30, OpenZeppelin v5)
+frontend/    Next.js 16 frontend (Tailwind v4, shadcn/ui, wagmi v2)
+scripts/     Utility scripts (ABI sync, schema registration)
 ```
 
 For deeper detail, see [`contracts/README.md`](contracts/README.md) and [`frontend/README.md`](frontend/README.md).
 
 ## Architecture
 
-[`_bmad-output/planning-artifacts/architecture.md`](_bmad-output/planning-artifacts/architecture.md)
+Somi composes three Somnia primitives into a single autonomous resolution loop:
+
+- **Reactivity** — `createMarket` registers a one-shot `scheduleSubscriptionAtTimestamp` deposit; when the resolution time elapses, Somnia fires `handleResponse` on the contract with no external trigger required.
+- **Agents** — the same `handleResponse` callback queries a JSON API agent (`fetchUint`) and, when the result falls inside the ambiguity band, chains an LLM Tiebreaker agent (`inferString` with `allowedValues = ["YES", "NO", "INVALID"]`). Reasoning is anchored in the Somnia Agents receipt.
+- **Streams** — on settlement, the contract emits a typed `OutcomePublished` event via the Streams SDK so downstream contracts (e.g. `MarketOutcomeSubscriber`) can compose with outcomes in the same block.
+
+**Stack.** One primary contract (`PredictionMarket.sol`) on Solidity 0.8.30 with OpenZeppelin v5 (`ReentrancyGuard`, custom errors), plus a stretch `MarketOutcomeSubscriber.sol` for the Streams demo. Foundry handles unit, fuzz, and invariant tests (≥90% coverage target). The frontend is Next.js 16 on the App Router with five locked routes (`/`, `/markets/[id]`, `/create`, `/my-bets`, `/about`), viem + wagmi v2 with block-aware reads (no polling), RainbowKit for wallet connection, and Tailwind v4 + shadcn/ui under a single dark-mode theme. No off-chain backend, no database, no oracle.
+
+**State machine.** Markets transition `Open → Resolving → (LLMResolving →) Resolved | Refunded`. `Refunded` covers both `INVALID` verdicts and timed-out callbacks; `INVALID` is treated as a first-class verdict, not an error. The callback validates `msg.sender == SOMNIA_AGENTS` before routing by stored request metadata (`requestId → marketId + agentType`); `claim` and `refund` use `ReentrancyGuard` with the CEI pattern. No admin keys, no upgradeability.
+
+**Deploy targets.** Somnia Testnet (chain 50312) only; Vercel for the frontend. Contract maintains ≥32 STT to cover Reactivity precompile fees per the deploy steps above.
 
 ## On the Somnia Prototype
 
-**(a)** Somnia Agents is prototype-stage infrastructure. The `handleResponse` callback interface and `SOMNIA_AGENTS_ADDR` are subject to change before mainnet. The address `0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776` is the testnet value from Somnia's verified research documentation (§12).
+**(a)** Somnia Agents is prototype-stage infrastructure. The `handleResponse` callback interface and `SOMNIA_AGENTS_ADDR` are subject to change before mainnet. The address `0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776` is the current Somnia Testnet value; verify it against the [official Somnia Agents documentation](https://docs.somnia.network) before redeploying.
 
 **(b)** Somnia Agent receipts are currently stored on centralised infrastructure operated by the Somnia Foundation. This is a known limitation of the Agentathon prototype (AR-22 I1, NFR-6). A decentralised receipt layer is on the roadmap.
 
-**(c)** The Somnia Streams API changed in April 2026. The `registerDataSchemas` call shape changed from `{ id, schema }` to `{ schemaName, schema, parentSchemaId }`. Earlier tutorials online are outdated. See [`contracts/README.md`](contracts/README.md) §"Epic 5 — Outcome Publication" for the current shape.
+**(c)** The Somnia Streams API changed in April 2026. The `registerDataSchemas` call shape changed from `{ id, schema }` to `{ schemaName, schema, parentSchemaId }`. Earlier tutorials online are outdated. See [`contracts/README.md`](contracts/README.md) for the current shape.
 
-**(d)** All contract addresses (Agents, Streams proxy) are pinned to the values from Somnia's verified research §12. Do not update these without verifying against official Somnia documentation — the wrong address silently fails.
+**(d)** All contract addresses (Agents, Streams proxy) are pinned to the values published in the [official Somnia documentation](https://docs.somnia.network). Do not update these without re-verifying against that source — the wrong address silently fails.
 
 ## Demo Video
 
@@ -165,10 +188,4 @@ cd contracts && forge coverage --report summary
 cd contracts && slither src/
 ```
 
-## Frontend Deployment
 
-```bash
-cd frontend
-vercel link    # one-time
-vercel --prod  # subsequent deploys (or auto on git push to main)
-```

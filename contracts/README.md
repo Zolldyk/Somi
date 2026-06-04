@@ -191,3 +191,128 @@ then fund via `cast send --value 35ether` once deployed.
 > `MarketResolved` (from `PredictionMarket`) and `OutcomeMirrored` (from `MarketOutcomeSubscriber`)
 > in the same block — demonstrating that external contracts can compose with Somi outcomes
 > on-chain without any off-chain indexing.
+
+## Demo Run Plan
+
+### Prerequisites
+
+Check the contract has ≥32 STT balance before seeding (createMarket reverts with
+`PredictionMarket__InsufficientReactivityFunds` if underfunded):
+
+```bash
+cast balance 0xb6824307ba77afF3de9d7899d5Ab6C9cded23546 --rpc-url $SOMNIA_TESTNET_RPC
+```
+
+If the balance is low, top it up first:
+
+```bash
+cast send 0xb6824307ba77afF3de9d7899d5Ab6C9cded23546 \
+  --account somi-deployer \
+  --rpc-url $SOMNIA_TESTNET_RPC \
+  --value 35ether \
+  --legacy
+```
+
+### Pre-seed: verify the sports selector resolves
+
+The sports market uses the ESPN scoreboard selector `events.0.competitions.0.competitors.0.score`.
+If no NBA game is scheduled in the +6 h window, the `events` array is empty and the agent returns
+Failed → market resolves to `Disputed`. Verify there's a live or upcoming game before seeding:
+
+```bash
+curl -s "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard" \
+  | jq '.events | length, .events[0].name'
+```
+
+A `0` or empty result means swap to a different sport (`/basketball/wnba/scoreboard` is a safe
+in-season fallback) before continuing.
+
+### Pre-seed: capture spot SOL for the wildcard
+
+The wildcard relies on SOL landing inside the threshold's 10 % ambiguity band so the LLM tiebreaker
+fires. Pin the threshold to spot SOL at seed time:
+
+```bash
+export SEED_WILDCARD_THRESHOLD=$(
+  curl -s "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd" \
+    | jq '.solana.usd | floor'
+)
+echo "Wildcard threshold set to $SEED_WILDCARD_THRESHOLD"
+```
+
+### Seeding the demo markets
+
+Run this at least **2 hours** before recording, but **≤4 hours** before — so the crypto market
+resolves during the session rather than before you start:
+
+```bash
+export PM_ADDRESS=0xb6824307ba77afF3de9d7899d5Ab6C9cded23546
+export SOMNIA_TESTNET_RPC=https://api.infra.testnet.somnia.network
+
+forge script script/SeedDemoMarkets.s.sol \
+  --account somi-deployer \
+  --rpc-url $SOMNIA_TESTNET_RPC \
+  --broadcast \
+  --legacy \
+  --gas-limit 30000000
+```
+
+Optional threshold override (BTC default 105 000 — drop it if BTC has moved below):
+
+```bash
+# Set comfortably below current price (>2% gap) so Beat 4 resolves YES cleanly
+export SEED_BTC_THRESHOLD=103000
+```
+
+### After seeding
+
+The script prints the three `marketId` values to stdout:
+
+```
+=== Demo Market IDs ===
+Crypto  (Beat 4): 7
+Sports          : 8
+Wildcard (Beat 5): 9
+Copy this marketId into NEXT_PUBLIC_FEATURED_MARKET_ID: 7
+```
+
+1. Copy the **crypto market's ID** into `frontend/.env.local`:
+   ```
+   NEXT_PUBLIC_FEATURED_MARKET_ID=<cryptoMarketId>
+   ```
+2. Redeploy to Vercel (or update the env var in the Vercel dashboard and trigger a redeploy)
+   so the FeaturedMarketCard hero slot on the home page shows the live crypto market.
+
+### Recording schedule
+
+| Market | Resolves | Demo beat |
+|--------|----------|-----------|
+| Crypto (BTC/USD) | +3 h from seeding | Beat 4 — YES resolution |
+| Sports (NBA) | +6 h from seeding | Any clean resolution (requires live game in window) |
+| Wildcard (SOL/USD) | +3 h from seeding | Beat 5 — INVALID via LLM tiebreaker |
+
+The crypto and wildcard markets both resolve within the recording window. The wildcard relies on
+SOL staying inside the ±10 % band of the spot-captured threshold — typically reliable over 3 h, but
+if SOL moves more than 10 % during the window the market resolves cleanly and Beat 5 has no LLM
+footage.
+
+### Re-seeding (do-over)
+
+Re-run the seeder script at any time — each run creates fresh markets with new `marketId`s. Each
+`createMarket` consumes some of the contract's reactivity reserve, so after 2–3 re-seeds top the
+contract back up with `cast send <pm> --value 35ether --legacy` to stay above the 32 STT floor.
+
+## Pre-Deploy Checklist
+
+Before pushing to production on Vercel:
+
+1. **Bundle size** — `cd frontend && pnpm build` — confirm the largest route's "First Load JS" is < 700KB (≈ <500KB gzipped per NFR-2). If over budget, run `ANALYZE=true pnpm build` (requires `@next/bundle-analyzer` in devDependencies) to identify contributors.
+
+2. **FMP verification** — After deploying to Vercel, check the Speed Insights tab in the Vercel dashboard. Target: FMP < 2s on cold-start (NFR-2). If FMP > 2s, the most common fix is converting heavy Client Components on the slowest route to Server Components.
+
+3. **Environment variables** — Confirm the required env vars are set in the Vercel dashboard:
+   - `NEXT_PUBLIC_CONTRACT_ADDRESS` (required) — the deployed `PredictionMarket` address.
+   - `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` (required) — the app throws on first render without it.
+   - `NEXT_PUBLIC_FEATURED_MARKET_ID` (optional) — set after seeding to feature the crypto market on the homepage.
+
+4. **Smoke test** — After deploy: connect wallet → place bet → confirm the Resolving pipeline strip appears. Verify the Featured market card loads on `/`.

@@ -2,9 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { WalletConnectPill } from './WalletConnectPill';
+
+const MOBILE_NAV_ID = 'topnav-mobile-drawer';
 
 const NAV_LINKS = [
   { label: 'Markets', href: '/' },
@@ -16,6 +18,15 @@ const NAV_LINKS = [
 export function TopNav() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileOpen]);
 
   const linkClass = (href: string) =>
     pathname === href
@@ -34,7 +45,7 @@ export function TopNav() {
 
         <nav className="hidden lg:flex items-center gap-8" aria-label="Main navigation">
           {NAV_LINKS.map(({ label, href }) => (
-            <Link key={href} href={href} className={linkClass(href)}>
+            <Link key={href} href={href} className={`${linkClass(href)} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded`}>
               {label}
             </Link>
           ))}
@@ -45,23 +56,24 @@ export function TopNav() {
         </div>
 
         <button
-          className="lg:hidden p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className="lg:hidden min-w-[44px] min-h-[44px] p-2 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded"
           onClick={() => setMobileOpen((o) => !o)}
           aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
           aria-expanded={mobileOpen}
+          aria-controls={MOBILE_NAV_ID}
         >
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
       </div>
 
       {mobileOpen && (
-        <div className="lg:hidden border-t border-border bg-background px-4 pb-4 flex flex-col gap-4">
+        <div id={MOBILE_NAV_ID} className="lg:hidden border-t border-border bg-background px-4 pb-4 flex flex-col gap-4">
           <nav className="flex flex-col gap-2 pt-4" aria-label="Mobile navigation">
             {NAV_LINKS.map(({ label, href }) => (
               <Link
                 key={href}
                 href={href}
-                className={linkClass(href) + ' py-2'}
+                className={`${linkClass(href)} py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded`}
                 onClick={() => setMobileOpen(false)}
               >
                 {label}

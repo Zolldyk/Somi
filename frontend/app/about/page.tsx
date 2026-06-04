@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 
 export const metadata: Metadata = {
-  title: 'About — Somi',
+  title: 'About',
   description:
     'Somi resolves prediction markets autonomously using Somnia Reactivity, JSON API agents, and Streams. AI shows its work, recorded on-chain.',
 };

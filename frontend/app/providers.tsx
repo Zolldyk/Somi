@@ -4,6 +4,7 @@ import { WagmiProvider } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
 import { Toaster } from '@/components/ui/sonner';
+import { AxeRunner } from '@/components/dev/AxeRunner';
 import { config } from '@/lib/config';
 import '@rainbow-me/rainbowkit/styles.css';
 
@@ -54,6 +55,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider theme={somiTheme}>
           <Toaster />
+          {process.env.NODE_ENV !== 'production' && <AxeRunner />}
           {children}
         </RainbowKitProvider>
       </QueryClientProvider>
