@@ -568,6 +568,25 @@
     "anonymous": false
   },
   {
+    "type": "event",
+    "name": "StreamsPublishFailed",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "reason",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      }
+    ],
+    "anonymous": false
+  },
+  {
     "type": "error",
     "name": "EmptyFilter",
     "inputs": []

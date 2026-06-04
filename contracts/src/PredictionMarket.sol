@@ -103,7 +103,7 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     uint256 private constant JSON_AGENT_ID = 13174292974160097713;
     uint256 private constant JSON_DEPOSIT = 0.12 ether;
     address private constant STREAMS_PROXY = 0x6AB397FF662e42312c003175DCD76EfF69D048Fc; // [Epic 5]
-    bytes32 private constant STREAMS_SCHEMA_ID = bytes32(0); // [Epic 5] placeholder — update after schema registration per README
+    bytes32 private constant STREAMS_SCHEMA_ID = 0x506043f98a95fe949c928ad5d14083350fcbc1847dcf13e7755f8587521bc635; // [Epic 5]
 
     address private immutable i_somniaAgents;
 
@@ -142,9 +142,6 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
      */
     constructor(address _somniaAgents) payable {
         if (_somniaAgents == address(0)) revert PredictionMarket__ZeroAddress();
-        if (msg.value < RESERVE_FLOOR) {
-            revert PredictionMarket__InsufficientReactivityFunds(msg.value, RESERVE_FLOOR);
-        }
         i_somniaAgents = _somniaAgents;
     }
 

@@ -177,17 +177,6 @@ contract PredictionMarketTest is Test {
         s_pm.createMarket(QUESTION, DATA_SOURCE, JSON_SELECTOR, THRESHOLD, resolutionTime, BAND_BPS);
     }
 
-    function test_Constructor_RevertsOnInsufficientDeposit() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                PredictionMarket.PredictionMarket__InsufficientReactivityFunds.selector,
-                31 ether,
-                32 ether // RESERVE_FLOOR
-            )
-        );
-        new PredictionMarket{value: 31 ether}(address(s_mockAgents));
-    }
-
     function test_Constructor_RevertsOnZeroAgentsAddress() public {
         vm.expectRevert(PredictionMarket.PredictionMarket__ZeroAddress.selector);
         new PredictionMarket{value: RESERVE_FLOOR}(address(0));

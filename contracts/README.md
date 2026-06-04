@@ -150,3 +150,44 @@ Recompile with `forge build` and redeploy before enabling Story 5.2's `_publishO
 Deploying with the `bytes32(0)` placeholder means Story 5.2's `esstores()` call will fail
 (submitting a record with schemaId `0x0000...`). The `try/catch` in Story 5.2 ensures this
 never reverts settlement — but outcome records will not appear in subscribers.
+
+### Deploy `MarketOutcomeSubscriber`
+
+`MarketOutcomeSubscriber` is an example subscriber that reacts to every Somi settlement via
+Reactivity callbacks from the Streams proxy. Deploy it after `PredictionMarket` is live and
+the schema ID is known.
+
+> **Somnia CREATE caveat:** `msg.value` is not credited to the contract during `CREATE` on
+> Somnia testnet — funding must happen as a separate `cast send` after deployment. Likewise,
+> `SomniaExtensions.subscribe()` can't run in the constructor (it requires balance ≥32 STT,
+> which the contract doesn't yet have). The subscriber therefore exposes a one-shot
+> `subscribe()` external function called after funding.
+
+Three-step deploy:
+
+```bash
+# 1. Deploy (no value — would be lost)
+forge create --account somi-deployer --rpc-url $SOMNIA_TESTNET_RPC --broadcast --legacy \
+  --gas-limit 30000000 \
+  src/MarketOutcomeSubscriber.sol:MarketOutcomeSubscriber \
+  --constructor-args $STREAMS_PROXY $STREAMS_SCHEMA_ID
+
+# 2. Fund with ≥32 STT (Reactivity precompile minimum balance)
+cast send <SUBSCRIBER_ADDRESS> --account somi-deployer --rpc-url $SOMNIA_TESTNET_RPC \
+  --value 35ether --legacy
+
+# 3. Register the subscription
+cast send <SUBSCRIBER_ADDRESS> "subscribe()" --account somi-deployer \
+  --rpc-url $SOMNIA_TESTNET_RPC --legacy --gas-limit 5000000
+```
+
+The same caveats apply to `PredictionMarket` itself: deploy with `--gas-limit 30000000 --legacy`,
+then fund via `cast send --value 35ether` once deployed.
+
+> **Capture the deployed address** — update `MARKET_OUTCOME_SUBSCRIBER` in your `.env.local`
+> for Demo Beat 6 narration.
+
+> **Demo Beat 6 payoff:** After the next market settles, Shannon Explorer will show both
+> `MarketResolved` (from `PredictionMarket`) and `OutcomeMirrored` (from `MarketOutcomeSubscriber`)
+> in the same block — demonstrating that external contracts can compose with Somi outcomes
+> on-chain without any off-chain indexing.
