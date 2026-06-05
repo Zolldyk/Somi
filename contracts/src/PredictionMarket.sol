@@ -68,6 +68,7 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     error PredictionMarket__InvalidSide();
     error PredictionMarket__TransferFailed();
     error PredictionMarket__ZeroAddress();
+    error PredictionMarket__ResolutionTimeTaken();
 
     // ============ Type declarations ============
 
@@ -114,6 +115,11 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     mapping(uint256 => uint256) private s_requestToMarket;
     uint256 private s_marketCount;
     mapping(uint256 => uint256) private s_subscriptionToMarket;
+    // Maps a resolution second (unix seconds) → marketId. The reactivity precompile delivers
+    // Schedule(uint256 indexed timestampMillis) callbacks whose only identifying field is the
+    // indexed timestamp (no event data), and that timestamp is the actual block time in ms.
+    // _onEvent truncates it to seconds to recover the market. Keyed on resolutionTime (seconds).
+    mapping(uint256 => uint256) private s_scheduleToMarket;
 
     // ============ Events ============
 
@@ -202,12 +208,20 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
 
         emit MarketCreated(marketId, msg.sender, question, resolutionTime);
 
+        // The Schedule callback carries the ACTUAL block time in ms — the scheduled second plus
+        // block-production jitter (observed ~tens of ms) — not the exact scheduled ms. So the lookup
+        // is keyed on the resolution SECOND, and _onEvent truncates the delivered ms back to seconds.
+        // One market per resolution second (inherent to the mechanism) — reject a taken slot.
+        if (s_scheduleToMarket[resolutionTime] != 0) revert PredictionMarket__ResolutionTimeTaken();
+        s_scheduleToMarket[resolutionTime] = marketId;
+        uint256 scheduleMs = uint256(resolutionTime) * 1000;
+
         // [ARCHITECTURE-DECISION] The reactivity precompile returns subscriptionId, so reverse-lookup writes
         // happen after this external call. The precompile is fixed at address(0x0100), and the market is already
         // stored before scheduling, so a duplicate callback cannot corrupt terminal state.
         // slither-disable-next-line reentrancy-benign,reentrancy-events
         uint256 subscriptionId = SomniaExtensions.scheduleSubscriptionAtTimestamp(
-            address(this), uint256(resolutionTime) * 1000, SomniaExtensions.defaultSubscriptionOptions()
+            address(this), scheduleMs, SomniaExtensions.defaultSubscriptionOptions()
         );
         s_markets[marketId].subscriptionId = subscriptionId;
         s_subscriptionToMarket[subscriptionId] = marketId;
@@ -531,15 +545,18 @@ contract PredictionMarket is SomniaEventHandler, ReentrancyGuard {
     }
 
     /// @notice Autonomous resolution trigger — fires in the same block as `resolutionTime` (NFR-2 same-block guarantee).
-    /// @dev Somnia precompile packs `abi.encode(subscriptionId)` into `data` for scheduled callbacks.
-    ///      Reverse-lookup: s_subscriptionToMarket[subscriptionId] → marketId.
+    /// @dev The precompile delivers Schedule(uint256 indexed timestampMillis) callbacks. The timestamp is the
+    ///      only identifying field — it arrives in `eventTopics[1]`, and the event carries no non-indexed `data`.
+    ///      The delivered timestamp is the ACTUAL block time in ms (scheduled second + block jitter), so it is
+    ///      truncated back to seconds (/ 1000) to recover the market via s_scheduleToMarket. An unknown
+    ///      timestamp (marketId == 0) is ignored so a stray callback can never touch the zero-slot market.
     ///      Graceful-fail path: if balance < JSON_DEPOSIT, emits ResolutionDeferred and returns with NO
     ///      state mutation — the market stays Open and will never auto-resolve (NFR-5 no-admin caveat).
     ///      Status guard (requireStatus Open) prevents a duplicate callback from corrupting a market
     ///      already in Resolving/LLMResolving state (should not occur with one-shot subscriptions).
-    function _onEvent(address, bytes32[] calldata, bytes calldata data) internal override {
-        uint256 subscriptionId = abi.decode(data, (uint256));
-        uint256 marketId = s_subscriptionToMarket[subscriptionId];
+    function _onEvent(address, bytes32[] calldata eventTopics, bytes calldata) internal override {
+        uint256 marketId = s_scheduleToMarket[uint256(eventTopics[1]) / 1000];
+        if (marketId == 0) return;
 
         if (address(this).balance < JSON_DEPOSIT) {
             emit ResolutionDeferred(marketId);

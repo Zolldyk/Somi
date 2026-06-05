@@ -11,6 +11,8 @@ import {MarketStatus, Verdict, AgentRequestType} from "../src/libraries/MarketLi
 import {ISomniaAgents} from "../src/interfaces/ISomniaAgents.sol";
 import {MockSomniaAgents} from "./mocks/MockSomniaAgents.sol";
 import {MockSomniaReactivityPrecompile} from "./mocks/MockSomniaReactivityPrecompile.sol";
+import {ISomniaReactivityPrecompile} from
+    "@somnia-chain/reactivity-contracts/contracts/interfaces/ISomniaReactivityPrecompile.sol";
 
 // ============================================================
 //  Handler — defines all valid state-transition actions
@@ -125,8 +127,12 @@ contract PredictionMarketHandler is CommonBase, StdCheats, StdUtils {
         if (m.status != MarketStatus.Open) return;
         if (m.subscriptionId == 0) return;
 
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = ISomniaReactivityPrecompile.Schedule.selector;
+        topics[1] = bytes32(uint256(m.resolutionTime) * 1000 + 777);
+
         vm.prank(PRECOMPILE);
-        try s_pm.onEvent(PRECOMPILE, new bytes32[](0), abi.encode(m.subscriptionId)) {
+        try s_pm.onEvent(PRECOMPILE, topics, "") {
             _updateTerminal(mid);
         } catch {}
     }

@@ -25,6 +25,9 @@ contract PredictionMarketTest is Test {
     PredictionMarket private s_pm;
     MockSomniaAgents private s_mockAgents;
     bool private s_usingMockPrecompile;
+    // Hands out a distinct resolution second per _createDefaultMarket call (one schedule slot
+    // per second); resets per test, so single-market tests keep the original timestamp.
+    uint64 private s_resolutionNonce;
     MockSomniaStreams private s_mockStreams; // [Epic 5]
     address private constant MOCK_AGENTS = address(0xA9E5);
     address private constant PRECOMPILE = address(0x0100);
@@ -99,11 +102,12 @@ contract PredictionMarketTest is Test {
     }
 
     function test_CreateMarket_MonotonicIds() public {
+        // Each market needs a distinct resolution second (one schedule slot per second).
         uint64 resolutionTime = uint64(block.timestamp + MIN_LEAD_TIME + 1);
 
         uint256 id1 = s_pm.createMarket(QUESTION, DATA_SOURCE, JSON_SELECTOR, THRESHOLD, resolutionTime, BAND_BPS);
-        uint256 id2 = s_pm.createMarket(QUESTION, DATA_SOURCE, JSON_SELECTOR, THRESHOLD, resolutionTime, BAND_BPS);
-        uint256 id3 = s_pm.createMarket(QUESTION, DATA_SOURCE, JSON_SELECTOR, THRESHOLD, resolutionTime, BAND_BPS);
+        uint256 id2 = s_pm.createMarket(QUESTION, DATA_SOURCE, JSON_SELECTOR, THRESHOLD, resolutionTime + 1, BAND_BPS);
+        uint256 id3 = s_pm.createMarket(QUESTION, DATA_SOURCE, JSON_SELECTOR, THRESHOLD, resolutionTime + 2, BAND_BPS);
 
         assertEq(id1, 1);
         assertEq(id2, 2);
@@ -209,7 +213,8 @@ contract PredictionMarketTest is Test {
     // ============ placeBet Helpers ============
 
     function _createDefaultMarket() internal returns (uint256 marketId, uint64 resolutionTime) {
-        resolutionTime = uint64(block.timestamp + MIN_LEAD_TIME + 1);
+        resolutionTime = uint64(block.timestamp + MIN_LEAD_TIME + 1 + s_resolutionNonce);
+        s_resolutionNonce++;
         marketId = s_pm.createMarket(QUESTION, DATA_SOURCE, JSON_SELECTOR, THRESHOLD, resolutionTime, BAND_BPS);
     }
 
@@ -1015,18 +1020,20 @@ contract PredictionMarketTest is Test {
 
     function test_OnEvent_OpenToResolving_HappyPath() public {
         (uint256 marketId,) = _createDefaultMarket();
-        uint256 subscriptionId = s_pm.getMarket(marketId).subscriptionId; // = 1 from mock
 
         // First createRequest in this test returns requestId = 1 (s_mockAgents.s_nextRequestId = 1)
         vm.expectEmit(true, true, false, false, address(s_pm));
         emit PredictionMarket.ResolutionInitiated(marketId, 1);
 
+        // Real Schedule(uint256 indexed timestampMillis) callback shape: identity in eventTopics[1],
+        // and EMPTY data (the timestamp is indexed). The handler must not depend on `data`.
         bytes32[] memory topics = new bytes32[](2);
         topics[0] = ISomniaReactivityPrecompile.Schedule.selector;
-        topics[1] = bytes32(uint256(s_pm.getMarket(marketId).resolutionTime) * 1000);
+        // Delivered ms = scheduled second * 1000 + block jitter (here 777ms); _onEvent truncates to seconds.
+        topics[1] = bytes32(uint256(s_pm.getMarket(marketId).resolutionTime) * 1000 + 777);
 
         vm.prank(PRECOMPILE);
-        s_pm.onEvent(PRECOMPILE, topics, abi.encode(subscriptionId));
+        s_pm.onEvent(PRECOMPILE, topics, "");
 
         PredictionMarket.Market memory m = s_pm.getMarket(marketId);
         assertEq(uint8(m.status), uint8(MarketStatus.Resolving));
@@ -1036,7 +1043,6 @@ contract PredictionMarketTest is Test {
 
     function test_OnEvent_EmitsResolutionDeferred_WhenInsufficientBalance() public {
         (uint256 marketId,) = _createDefaultMarket();
-        uint256 subscriptionId = s_pm.getMarket(marketId).subscriptionId;
 
         // Drain below JSON_DEPOSIT (0.12 ether)
         vm.deal(address(s_pm), 0.05 ether);
@@ -1044,8 +1050,13 @@ contract PredictionMarketTest is Test {
         vm.expectEmit(true, false, false, false, address(s_pm));
         emit PredictionMarket.ResolutionDeferred(marketId);
 
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = ISomniaReactivityPrecompile.Schedule.selector;
+        // Delivered ms = scheduled second * 1000 + block jitter (here 777ms); _onEvent truncates to seconds.
+        topics[1] = bytes32(uint256(s_pm.getMarket(marketId).resolutionTime) * 1000 + 777);
+
         vm.prank(PRECOMPILE);
-        s_pm.onEvent(PRECOMPILE, new bytes32[](0), abi.encode(subscriptionId));
+        s_pm.onEvent(PRECOMPILE, topics, "");
 
         // No state mutation — market stays Open
         assertEq(uint8(s_pm.getMarket(marketId).status), uint8(MarketStatus.Open));
@@ -1056,6 +1067,22 @@ contract PredictionMarketTest is Test {
         vm.prank(address(0xBEEF));
         vm.expectRevert(SomniaEventHandler.OnlyReactivityPrecompile.selector);
         s_pm.onEvent(address(0), new bytes32[](0), "");
+    }
+
+    function test_OnEvent_UnknownTimestamp_IsNoOp() public {
+        (uint256 marketId,) = _createDefaultMarket();
+
+        // A timestamp that maps to no market resolves to marketId 0 and must be ignored —
+        // never touching the zero-slot market or reverting.
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = ISomniaReactivityPrecompile.Schedule.selector;
+        topics[1] = bytes32(uint256(0xDEADBEEF));
+
+        vm.prank(PRECOMPILE);
+        s_pm.onEvent(PRECOMPILE, topics, "");
+
+        // Real market untouched; still Open.
+        assertEq(uint8(s_pm.getMarket(marketId).status), uint8(MarketStatus.Open));
     }
 
     function test_ReactivityFlow_OpenToResolving_ForkTest() public {
@@ -1076,7 +1103,7 @@ contract PredictionMarketTest is Test {
         // Manually simulate the precompile callback (vm.warp does not auto-fire subscriptions)
         bytes32[] memory topics = new bytes32[](2);
         topics[0] = ISomniaReactivityPrecompile.Schedule.selector;
-        topics[1] = bytes32(uint256(m.resolutionTime) * 1000);
+        topics[1] = bytes32(uint256(m.resolutionTime) * 1000 + 777);
 
         vm.prank(PRECOMPILE);
         s_pm.onEvent(PRECOMPILE, topics, abi.encode(m.subscriptionId));
