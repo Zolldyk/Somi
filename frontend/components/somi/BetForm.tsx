@@ -155,7 +155,7 @@ function BetFormBase({ market, poolDelta, className }: BetFormProps) {
             role="radio"
             aria-checked={false}
             onClick={() => setSelectedSide(0)}
-            className="flex-1 min-h-[44px] rounded-sm border border-accent-yes/30 py-2 font-mono text-sm text-accent-yes/60"
+            className="flex-1 min-h-[44px] rounded-sm border border-accent-yes/50 py-2 font-mono text-sm text-accent-yes/80"
           >
             YES
           </button>
@@ -174,7 +174,7 @@ function BetFormBase({ market, poolDelta, className }: BetFormProps) {
             role="radio"
             aria-checked={false}
             onClick={() => setSelectedSide(1)}
-            className="flex-1 min-h-[44px] rounded-sm border border-accent-no/30 py-2 font-mono text-sm text-accent-no/60"
+            className="flex-1 min-h-[44px] rounded-sm border border-accent-no/50 py-2 font-mono text-sm text-accent-no/80"
           >
             NO
           </button>

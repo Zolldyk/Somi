@@ -63,7 +63,7 @@ function PoolBarBase({ yesPool, noPool, winnerSide, variant = 'md', className }:
         role="meter"
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={isEmpty ? undefined : yesPctNum}
+        aria-valuenow={yesPctNum}
         aria-label="YES probability"
         className={cn(poolBarTrackVariants({ variant }))}
       >
