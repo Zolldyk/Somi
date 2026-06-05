@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect } from 'react';
+import { useEffect } from 'react';
 import { notFound } from 'next/navigation';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { formatUnits } from 'viem';
@@ -33,9 +33,7 @@ function isUserRejection(error: unknown): boolean {
   return msg.toLowerCase().includes('rejected') || msg.toLowerCase().includes('denied');
 }
 
-export default function MarketDetailClient({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-
+export default function MarketDetailClient({ id }: { id: string }) {
   let parsedMarketId: bigint | null;
   try {
     parsedMarketId = BigInt(id);
