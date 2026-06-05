@@ -1,3 +1,5 @@
+'use client';
+
 import { Skeleton } from '@/components/ui/skeleton';
 import { PoolBar } from '@/components/somi/PoolBar';
 

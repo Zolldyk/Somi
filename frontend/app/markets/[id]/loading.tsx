@@ -1,3 +1,5 @@
+'use client';
+
 import { VerdictBanner } from '@/components/somi/VerdictBanner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusPill } from '@/components/somi/StatusPill';

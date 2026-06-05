@@ -1,3 +1,5 @@
+'use client';
+
 import { FeaturedMarketCard } from '@/components/somi/FeaturedMarketCard';
 import { MarketCard } from '@/components/somi/MarketCard';
 import { FEATURED_MARKET_ID } from '@/lib/constants';
