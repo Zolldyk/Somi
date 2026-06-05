@@ -23,3 +23,6 @@ _bmad-output/
 .claude/
 design-artifacts/
 docs/
+
+# Playwright MCP output (screenshots, logs)
+.playwright-mcp/

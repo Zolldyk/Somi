@@ -21,16 +21,17 @@ contract SeedDemoMarkets is Script {
         uint256 sportsThreshold  = vm.envOr("SEED_SPORTS_THRESHOLD",   uint256(100));
         uint256 wildThreshold    = vm.envOr("SEED_WILDCARD_THRESHOLD", uint256(150));
 
-        // --- Hour offsets (resolution time = now + offset) ---
-        // Crypto default 3h so the README "≥2h, ≤4h before recording" window has headroom.
-        // Wildcard default 3h so SOL has a low probability of leaving the 10% ambiguity band.
-        uint256 cryptoOffsetH = vm.envOr("SEED_CRYPTO_OFFSET_HOURS",   uint256(3));
-        uint256 sportsOffsetH = vm.envOr("SEED_SPORTS_OFFSET_HOURS",   uint256(6));
-        uint256 wildOffsetH   = vm.envOr("SEED_WILDCARD_OFFSET_HOURS", uint256(3));
+        // --- Resolution offsets (resolution time = now + offset) ---
+        // Minute-level env vars take precedence; otherwise fall back to hour offsets * 60.
+        // Hour defaults: crypto/wildcard 3h so the README "≥2h, ≤4h before recording" window has
+        // headroom; wildcard 3h keeps SOL's probability of leaving the 10% ambiguity band low.
+        uint256 cryptoOffsetMin = vm.envOr("SEED_CRYPTO_OFFSET_MINUTES",   vm.envOr("SEED_CRYPTO_OFFSET_HOURS",   uint256(3)) * 60);
+        uint256 sportsOffsetMin = vm.envOr("SEED_SPORTS_OFFSET_MINUTES",   vm.envOr("SEED_SPORTS_OFFSET_HOURS",   uint256(6)) * 60);
+        uint256 wildOffsetMin   = vm.envOr("SEED_WILDCARD_OFFSET_MINUTES", vm.envOr("SEED_WILDCARD_OFFSET_HOURS", uint256(3)) * 60);
 
-        uint64 cryptoResolution = uint64(block.timestamp + cryptoOffsetH * 1 hours);
-        uint64 sportsResolution = uint64(block.timestamp + sportsOffsetH * 1 hours);
-        uint64 wildResolution   = uint64(block.timestamp + wildOffsetH   * 1 hours);
+        uint64 cryptoResolution = uint64(block.timestamp + cryptoOffsetMin * 1 minutes);
+        uint64 sportsResolution = uint64(block.timestamp + sportsOffsetMin * 1 minutes);
+        uint64 wildResolution   = uint64(block.timestamp + wildOffsetMin   * 1 minutes);
 
         vm.startBroadcast();
 
