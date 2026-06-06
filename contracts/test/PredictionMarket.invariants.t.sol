@@ -83,6 +83,39 @@ contract PredictionMarketHandler is CommonBase, StdCheats, StdUtils {
         return s_actors[i];
     }
 
+    // --- Struct builders (canonical Agents callback shape) ---
+
+    function _resp(bytes memory result) internal pure returns (ISomniaAgents.Response memory) {
+        return ISomniaAgents.Response({
+            validator: address(0),
+            result: result,
+            status: ISomniaAgents.ResponseStatus.Success,
+            receipt: 0,
+            timestamp: 0,
+            executionCost: 0
+        });
+    }
+
+    function _req() internal pure returns (ISomniaAgents.Request memory) {
+        return ISomniaAgents.Request({
+            id: 0,
+            requester: address(0),
+            callbackAddress: address(0),
+            callbackSelector: bytes4(0),
+            subcommittee: new address[](0),
+            responses: new ISomniaAgents.Response[](0),
+            responseCount: 0,
+            failureCount: 0,
+            threshold: 0,
+            createdAt: 0,
+            deadline: 0,
+            status: ISomniaAgents.ResponseStatus.None,
+            consensusType: ISomniaAgents.ConsensusType.Majority,
+            remainingBudget: 0,
+            perAgentBudget: 0
+        });
+    }
+
     // --- Handler actions ---
 
     function createMarket(uint256 futureOffset, uint256 threshold, uint256 bandBps) external {
@@ -146,8 +179,8 @@ contract PredictionMarketHandler is CommonBase, StdCheats, StdUtils {
         if (m.pendingRequestId == 0) return;
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode(fetchedValue)});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode(fetchedValue));
+        ISomniaAgents.Request memory req = _req();
 
         try s_mockAgents.callHandleResponse(m.pendingRequestId, responses, ISomniaAgents.ResponseStatus.Success, req) {
             _updateTerminal(mid);
@@ -169,8 +202,8 @@ contract PredictionMarketHandler is CommonBase, StdCheats, StdUtils {
         else verdict = "INVALID";
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode(verdict)});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode(verdict));
+        ISomniaAgents.Request memory req = _req();
 
         try s_mockAgents.callHandleResponse(m.pendingRequestId, responses, ISomniaAgents.ResponseStatus.Success, req) {
             _updateTerminal(mid);
@@ -190,7 +223,7 @@ contract PredictionMarketHandler is CommonBase, StdCheats, StdUtils {
             failStatusSeed % 2 == 0 ? ISomniaAgents.ResponseStatus.Failed : ISomniaAgents.ResponseStatus.TimedOut;
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](0);
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        ISomniaAgents.Request memory req = _req();
 
         try s_mockAgents.callHandleResponse(m.pendingRequestId, responses, failStatus, req) {
             _updateTerminal(mid);

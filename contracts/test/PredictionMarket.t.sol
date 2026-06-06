@@ -218,6 +218,37 @@ contract PredictionMarketTest is Test {
         marketId = s_pm.createMarket(QUESTION, DATA_SOURCE, JSON_SELECTOR, THRESHOLD, resolutionTime, BAND_BPS);
     }
 
+    function _resp(bytes memory result) internal pure returns (ISomniaAgents.Response memory) {
+        return ISomniaAgents.Response({
+            validator: address(0),
+            result: result,
+            status: ISomniaAgents.ResponseStatus.Success,
+            receipt: 0,
+            timestamp: 0,
+            executionCost: 0
+        });
+    }
+
+    function _req() internal pure returns (ISomniaAgents.Request memory) {
+        return ISomniaAgents.Request({
+            id: 0,
+            requester: address(0),
+            callbackAddress: address(0),
+            callbackSelector: bytes4(0),
+            subcommittee: new address[](0),
+            responses: new ISomniaAgents.Response[](0),
+            responseCount: 0,
+            failureCount: 0,
+            threshold: 0,
+            createdAt: 0,
+            deadline: 0,
+            status: ISomniaAgents.ResponseStatus.None,
+            consensusType: ISomniaAgents.ConsensusType.Majority,
+            remainingBudget: 0,
+            perAgentBudget: 0
+        });
+    }
+
     // ============ placeBet — Happy Paths ============
 
     function test_PlaceBet_YesSide() public {
@@ -428,7 +459,7 @@ contract PredictionMarketTest is Test {
         _seedPendingRequest(id, 1, AgentRequestType.JsonApi);
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](0);
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        ISomniaAgents.Request memory req = _req();
 
         vm.prank(address(0xBEEF));
         vm.expectRevert(PredictionMarket.PredictionMarket__OnlySomniaAgents.selector);
@@ -437,7 +468,7 @@ contract PredictionMarketTest is Test {
 
     function test_HandleResponse_RevertsOnUnknownRequest() public {
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](0);
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        ISomniaAgents.Request memory req = _req();
 
         vm.expectRevert(PredictionMarket.PredictionMarket__UnknownRequest.selector);
         s_mockAgents.callHandleResponse(99, responses, ISomniaAgents.ResponseStatus.Success, req);
@@ -459,7 +490,7 @@ contract PredictionMarketTest is Test {
 
         // Use Failed status to avoid responses[0] array-bounds panic
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](0);
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        ISomniaAgents.Request memory req = _req();
         s_mockAgents.callHandleResponse(requestId, responses, ISomniaAgents.ResponseStatus.Failed, req);
 
         PredictionMarket.Market memory mAfter = s_pm.getMarket(id);
@@ -472,8 +503,8 @@ contract PredictionMarketTest is Test {
         uint256 marketId = _seedResolvingMarket(oldJsonRequestId);
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode(THRESHOLD)});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode(THRESHOLD));
+        ISomniaAgents.Request memory req = _req();
 
         s_mockAgents.callHandleResponse(oldJsonRequestId, responses, ISomniaAgents.ResponseStatus.Success, req);
 
@@ -495,8 +526,8 @@ contract PredictionMarketTest is Test {
         // fetchedValue = 120_000 → above bandHigh (111_100) → YES
         uint256 fetchedValue = 120_000;
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode(fetchedValue)});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode(fetchedValue));
+        ISomniaAgents.Request memory req = _req();
 
         vm.expectEmit(true, false, false, true, address(s_pm));
         emit PredictionMarket.MarketResolved(marketId, Verdict.YES, 0, 0, requestId);
@@ -516,8 +547,8 @@ contract PredictionMarketTest is Test {
         // fetchedValue = 100_000 → below bandLow (108_900) → NO
         uint256 fetchedValue = 100_000;
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode(fetchedValue)});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode(fetchedValue));
+        ISomniaAgents.Request memory req = _req();
 
         vm.expectEmit(true, false, false, true, address(s_pm));
         emit PredictionMarket.MarketResolved(marketId, Verdict.NO, 0, 0, requestId);
@@ -537,8 +568,8 @@ contract PredictionMarketTest is Test {
         // fetchedValue = 110_000 = THRESHOLD (exactly on threshold, inside band) → LLMResolving
         uint256 fetchedValue = THRESHOLD;
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode(fetchedValue)});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode(fetchedValue));
+        ISomniaAgents.Request memory req = _req();
 
         s_mockAgents.callHandleResponse(requestId, responses, ISomniaAgents.ResponseStatus.Success, req);
 
@@ -555,7 +586,7 @@ contract PredictionMarketTest is Test {
         uint256 marketId = _seedResolvingMarket(requestId);
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](0);
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        ISomniaAgents.Request memory req = _req();
 
         vm.expectEmit(true, false, false, true, address(s_pm));
         emit PredictionMarket.ResolutionFailed(marketId, uint8(ISomniaAgents.ResponseStatus.Failed));
@@ -572,7 +603,7 @@ contract PredictionMarketTest is Test {
         uint256 marketId = _seedResolvingMarket(requestId);
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](0);
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        ISomniaAgents.Request memory req = _req();
 
         vm.expectEmit(true, false, false, true, address(s_pm));
         emit PredictionMarket.ResolutionFailed(marketId, uint8(ISomniaAgents.ResponseStatus.TimedOut));
@@ -601,8 +632,8 @@ contract PredictionMarketTest is Test {
         vm.store(address(s_pm), statusSlot, bytes32(uint256(1))); // Resolving
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode(fetchedValue)});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode(fetchedValue));
+        ISomniaAgents.Request memory req = _req();
 
         s_mockAgents.callHandleResponse(requestId, responses, ISomniaAgents.ResponseStatus.Success, req);
 
@@ -632,8 +663,8 @@ contract PredictionMarketTest is Test {
         uint256 marketId = _seedLLMResolvingMarket(requestId);
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode("YES")});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode("YES"));
+        ISomniaAgents.Request memory req = _req();
 
         vm.expectEmit(true, false, false, true, address(s_pm));
         emit PredictionMarket.MarketResolved(marketId, Verdict.YES, 0, 0, requestId);
@@ -651,8 +682,8 @@ contract PredictionMarketTest is Test {
         uint256 marketId = _seedLLMResolvingMarket(requestId);
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode("NO")});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode("NO"));
+        ISomniaAgents.Request memory req = _req();
 
         vm.expectEmit(true, false, false, true, address(s_pm));
         emit PredictionMarket.MarketResolved(marketId, Verdict.NO, 0, 0, requestId);
@@ -670,8 +701,8 @@ contract PredictionMarketTest is Test {
         uint256 marketId = _seedLLMResolvingMarket(requestId);
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode("INVALID")});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode("INVALID"));
+        ISomniaAgents.Request memory req = _req();
 
         vm.expectEmit(true, false, false, true, address(s_pm));
         emit PredictionMarket.MarketResolved(marketId, Verdict.INVALID, 0, 0, requestId);
@@ -690,7 +721,7 @@ contract PredictionMarketTest is Test {
         uint256 marketId = _seedLLMResolvingMarket(requestId);
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](0);
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        ISomniaAgents.Request memory req = _req();
 
         vm.expectEmit(true, false, false, true, address(s_pm));
         emit PredictionMarket.ResolutionFailed(marketId, uint8(ISomniaAgents.ResponseStatus.Failed));
@@ -707,8 +738,8 @@ contract PredictionMarketTest is Test {
         uint256 marketId = _seedLLMResolvingMarket(requestId);
 
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode("MAYBE")});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode("MAYBE"));
+        ISomniaAgents.Request memory req = _req();
 
         // Unknown verdict emits ResolutionFailed with Success status code (agent "succeeded" but returned garbage)
         vm.expectEmit(true, false, false, true, address(s_pm));
@@ -1171,8 +1202,8 @@ contract PredictionMarketTest is Test {
 
         uint256 fetchedValue = 120_000; // above bandHigh → YES
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode(fetchedValue)});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode(fetchedValue));
+        ISomniaAgents.Request memory req = _req();
 
         vm.recordLogs();
         s_mockAgents.callHandleResponse(requestId, responses, ISomniaAgents.ResponseStatus.Success, req);
@@ -1201,8 +1232,8 @@ contract PredictionMarketTest is Test {
 
         uint256 fetchedValue = 120_000; // above bandHigh → YES
         ISomniaAgents.Response[] memory responses = new ISomniaAgents.Response[](1);
-        responses[0] = ISomniaAgents.Response({result: abi.encode(fetchedValue)});
-        ISomniaAgents.Request memory req = ISomniaAgents.Request({payload: ""});
+        responses[0] = _resp(abi.encode(fetchedValue));
+        ISomniaAgents.Request memory req = _req();
 
         vm.expectEmit(true, false, false, false, address(s_pm));
         emit PredictionMarket.MarketResolved(marketId, Verdict.YES, 0, 0, requestId);
