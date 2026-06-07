@@ -159,10 +159,6 @@ Somi composes three Somnia primitives into a single autonomous resolution loop:
 
 **(d)** All contract addresses (Agents, Streams proxy) are pinned to the values published in the [official Somnia documentation](https://docs.somnia.network). Do not update these without re-verifying against that source — the wrong address silently fails.
 
-## Demo Video
-
-_Link added after Story 6.6 recording session._
-
 ## License
 
 MIT
